@@ -1,0 +1,26 @@
+# Browser automation
+playwright>=1.40.0
+
+# Claude Vision API
+anthropic>=0.39.0
+
+# Structured output validation
+pydantic>=2.0.0
+
+# Fuzzy string matching (player name validation)
+thefuzz[speedup]>=0.22.0
+
+# Database and export
+# (sqlite3 is built-in)
+
+# Web dashboard
+flask>=3.0.0
+
+# Telegram bot forwarding
+httpx>=0.27.0
+
+# Async support
+asyncio-compat>=0.1.0
+
+# Scheduling (for combined mode)
+apscheduler>=3.10.0

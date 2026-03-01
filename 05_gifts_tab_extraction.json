@@ -1,0 +1,47 @@
+{
+  "gifts": [
+    {
+      "player_name": "Lifanin",
+      "chest_type": "Sand Chest",
+      "source": "Level 10 Crypt",
+      "time_left": "17h 53m",
+      "quantity": 1,
+      "confidence": 1.0
+    },
+    {
+      "player_name": "Lifanin",
+      "chest_type": "Stone Chest",
+      "source": "Level 10 Crypt",
+      "time_left": "18h 0m",
+      "quantity": 1,
+      "confidence": 1.0
+    },
+    {
+      "player_name": "Lifanin",
+      "chest_type": "Barbarian Chest",
+      "source": "Level 10 Crypt",
+      "time_left": "18h 1m",
+      "quantity": 1,
+      "confidence": 1.0
+    },
+    {
+      "player_name": "Lifanin",
+      "chest_type": "Forgotten Chest",
+      "source": "Level 5 Crypt",
+      "time_left": "18h 4m",
+      "quantity": 1,
+      "confidence": 1.0
+    }
+  ],
+  "total_gift_count": 22,
+  "has_more": false,
+  "extraction_notes": "Page shows 4 visible gift entries. The Gifts tab displays a red badge with count 22. 'Claim chests' button is visible at the bottom, indicating this is the last page of gifts.",
+  "_meta": {
+    "model": "claude-haiku-4-5-20251001",
+    "image": "test_output/05_gifts_tab.png",
+    "elapsed_seconds": 5.08,
+    "input_tokens": 1807,
+    "output_tokens": 401,
+    "cost_estimate_usd": 0.00381
+  }
+}

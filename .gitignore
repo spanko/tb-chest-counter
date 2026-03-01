@@ -1,0 +1,29 @@
+# Config with secrets
+config/settings.json
+
+# Data files
+data/*.db
+data/*.jsonl
+data/*.log
+data/screenshots/
+data/exports/
+data/debug_*.png
+
+# Test outputs
+test_output/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,47 @@
+{
+  "gifts": [
+    {
+      "player_name": "Lifanin",
+      "chest_type": "Forgotten Chest",
+      "source": "Level 10 Crypt",
+      "time_left": "18h 12m",
+      "quantity": 1,
+      "confidence": 1.0
+    },
+    {
+      "player_name": "Lifanin",
+      "chest_type": "Forgotten Chest",
+      "source": "Level 10 Crypt",
+      "time_left": "18h 14m",
+      "quantity": 1,
+      "confidence": 1.0
+    },
+    {
+      "player_name": "Lifanin",
+      "chest_type": "Gnome Workshop Chest",
+      "source": "Level 10 Crypt",
+      "time_left": "18h 18m",
+      "quantity": 1,
+      "confidence": 1.0
+    },
+    {
+      "player_name": "CChicago bob",
+      "chest_type": "Elven Citadel Chest",
+      "source": "Level 15 Citadel",
+      "time_left": "18h 38m",
+      "quantity": 1,
+      "confidence": 1.0
+    }
+  ],
+  "total_gift_count": 23,
+  "has_more": false,
+  "extraction_notes": "All 4 visible gift entries extracted. The Gifts tab shows a red badge with total count of 23. Bottom of the list shows 'Delete expired chests' link and 'Claim chests' button, indicating this is the final page.",
+  "_meta": {
+    "model": "claude-haiku-4-5-20251001",
+    "image": "test_output/06_gifts_scrolled.png",
+    "elapsed_seconds": 4.81,
+    "input_tokens": 1807,
+    "output_tokens": 420,
+    "cost_estimate_usd": 0.00391
+  }
+}

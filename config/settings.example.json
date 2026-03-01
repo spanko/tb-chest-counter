@@ -1,0 +1,66 @@
+{
+    "game": {
+        "url": "https://totalbattle.com",
+        "username": "YOUR_UTILITY_ACCOUNT_USERNAME",
+        "password": "YOUR_UTILITY_ACCOUNT_PASSWORD",
+        "realm": 298,
+        "viewport": {"width": 1280, "height": 720}
+    },
+
+    "clan": {
+        "name": "YOUR_CLAN_NAME",
+        "roster": [
+            "Player1", "Player2", "Player3"
+        ],
+        "_roster_note": "Optional: list known member names for fuzzy-match validation. Leave empty to skip."
+    },
+
+    "chest_counter": {
+        "enabled": true,
+        "scan_interval_hours": 4,
+        "gift_region": {
+            "x": 370, "y": 130, "width": 740, "height": 510,
+            "_note": "Crop region for gift list. Calibrated from real 1280x720 screenshots."
+        },
+        "max_pages": 10,
+        "dedup_window_minutes": 60,
+        "multi_frame": true,
+        "multi_frame_count": 2,
+        "_multi_frame_note": "Take N screenshots per page and compare for consensus. 2 is reliable, 3 is paranoid."
+    },
+
+    "vision": {
+        "provider": "anthropic",
+        "model_routine": "claude-haiku-4-5-20251001",
+        "model_verify": "claude-sonnet-4-5-20250929",
+        "verify_threshold": 0.85,
+        "_verify_note": "Use routine model for most extractions. If confidence < threshold, re-run with verify model.",
+        "anthropic_api_key": "YOUR_ANTHROPIC_API_KEY"
+    },
+
+    "chat_bridge": {
+        "enabled": true,
+        "sendbird_channel_filter": [],
+        "_channel_filter_note": "List of channel_url prefixes to capture. Empty = capture all. Example: ['clan_channel_', 'triumph_realm_channel_298']",
+        "log_to_file": true,
+        "forward_to_telegram": false,
+        "telegram_bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+        "telegram_chat_id": "YOUR_TELEGRAM_CHAT_ID",
+        "telegram_format": "**{nickname}**: {message}",
+        "ignored_nicknames": [],
+        "_ignored_note": "Nicknames to not forward (e.g., bot accounts, system messages)"
+    },
+
+    "storage": {
+        "database": "data/toolkit.db",
+        "chest_log": "data/chest_log.jsonl",
+        "chat_log": "data/chat_log.jsonl",
+        "export_dir": "data/exports",
+        "screenshot_dir": "data/screenshots"
+    },
+
+    "dashboard": {
+        "host": "127.0.0.1",
+        "port": 5000
+    }
+}

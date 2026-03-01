@@ -1,0 +1,44 @@
+{
+    "_description": "Chest types, point values, source types, and aliases. Updated from real game screenshots.",
+
+    "chest_types": {
+        "_note": "Point values are configurable per clan. These defaults approximate relative rarity.",
+
+        "Sand Chest":              {"points": 1, "aliases": ["sand chest"]},
+        "Stone Chest":             {"points": 1, "aliases": ["stone chest"]},
+        "Barbarian Chest":         {"points": 2, "aliases": ["barbarian chest"]},
+        "Forgotten Chest":         {"points": 2, "aliases": ["forgotten chest"]},
+        "Gnome Workshop Chest":    {"points": 3, "aliases": ["gnome workshop chest", "gnome chest"]},
+        "Elven Citadel Chest":     {"points": 5, "aliases": ["elven citadel chest", "elven chest"]},
+        "Dwarf Treasury Chest":    {"points": 5, "aliases": ["dwarf treasury chest", "dwarf chest"]},
+        "Dragon Lair Chest":       {"points": 8, "aliases": ["dragon lair chest", "dragon chest"]},
+        "Ancient Temple Chest":    {"points": 8, "aliases": ["ancient temple chest"]},
+        "Dark Fortress Chest":     {"points": 10, "aliases": ["dark fortress chest"]},
+
+        "Common Chest":            {"points": 1, "aliases": ["common chest", "basic chest"]},
+        "Uncommon Chest":          {"points": 2, "aliases": ["uncommon chest", "green chest"]},
+        "Rare Chest":              {"points": 5, "aliases": ["rare chest", "blue chest"]},
+        "Epic Chest":              {"points": 15, "aliases": ["epic chest", "purple chest"]},
+        "Legendary Chest":         {"points": 50, "aliases": ["legendary chest", "gold chest", "golden chest"]},
+        "Mythic Chest":            {"points": 100, "aliases": ["mythic chest", "red chest"]},
+
+        "Rare Chest of Warlords":       {"points": 8, "aliases": ["rare warlord", "warlord rare"]},
+        "Epic Chest of Warlords":       {"points": 25, "aliases": ["epic warlord", "warlord epic"]},
+        "Legendary Chest of Warlords":  {"points": 75, "aliases": ["legendary warlord", "warlord legendary"]},
+
+        "Rare Chest of Champions":      {"points": 8, "aliases": ["rare champion", "champion rare"]},
+        "Epic Chest of Champions":      {"points": 25, "aliases": ["epic champion", "champion epic"]},
+        "Legendary Chest of Champions": {"points": 75, "aliases": ["legendary champion", "champion legendary"]},
+
+        "Clan Gift":               {"points": 1, "aliases": ["clan gift", "gift"]}
+    },
+
+    "source_types": {
+        "_note": "Source info from 'Source: Level X ...' field. Useful for tracking activity.",
+        "Crypt": {"levels": [1, 5, 10, 15, 20]},
+        "Citadel": {"levels": [1, 5, 10, 15, 20, 25]},
+        "Monster": {"levels": [1, 5, 10, 15, 20]},
+        "Event": {"levels": []},
+        "Unknown": {"levels": []}
+    }
+}
