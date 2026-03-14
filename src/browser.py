@@ -186,7 +186,8 @@ class TBBrowser:
         try:
             if await self.page.locator("canvas").first.is_visible(timeout=10000):
                 log.info("Already logged in (game canvas detected)")
-                await asyncio.sleep(10)
+                log.info("Waiting for game to fully load (30 seconds)...")
+                await asyncio.sleep(30)  # Give game more time to fully load
                 await self._dismiss_popups()
                 log.info("Login check complete.")
                 return
@@ -294,7 +295,8 @@ class TBBrowser:
         except Exception:
             log.warning("No canvas after 60s")
 
-        await asyncio.sleep(10)
+        log.info("Waiting for game to fully load after login (30 seconds)...")
+        await asyncio.sleep(30)  # Give game more time to fully load
         await self._dismiss_popups()
         log.info("Login complete.")
 

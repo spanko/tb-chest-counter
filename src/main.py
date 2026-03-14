@@ -66,13 +66,13 @@ async def cmd_calibrate(config: dict, visible: bool):
             elements = screen_data.get("elements", {})
             found = sum(1 for v in elements.values() if v)
             total = len(elements)
-            status = "✅" if found == total else "⚠️"
+            status = "OK" if found == total else "WARNING"
             print(f"  {status} {screen_name}: {found}/{total} elements located")
             for elem_name, coords in elements.items():
                 if coords:
                     print(f"      {elem_name}: ({coords['x']}, {coords['y']})")
                 else:
-                    print(f"      {elem_name}: ❌ NOT FOUND")
+                    print(f"      {elem_name}: NOT FOUND")
         print("=" * 60)
 
 
