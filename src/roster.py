@@ -203,65 +203,20 @@ async def scan_clan_roster(browser, config: dict) -> list[RosterMember]:
     Returns:
         Deduplicated list of RosterMember objects
     """
-    from calibration import load_calibration, get_element_coords, recalibrate_element
-
-    profile = load_calibration()
-    if not profile:
-        log.error("No calibration profile found. Run 'python main.py calibrate' first.")
-        return []
-
     ss_dir = ROOT / config["storage"]["screenshot_dir"] / "roster"
     ss_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Open clan panel ──────────────────────────────────────────────────
-    clan_btn = get_element_coords(profile, "main_game", "bottom_nav_clan")
-    if not clan_btn:
-        log.error("Calibration missing: main_game.bottom_nav_clan")
+    # Use browser's calibrated navigation
+    try:
+        await browser.navigate_to_members()
+    except RuntimeError as e:
+        log.error(f"Cannot navigate to members: {e}")
         return []
 
-    # Dismiss popups first
-    for _ in range(3):
-        await browser.page.keyboard.press("Escape")
-        await asyncio.sleep(0.3)
-    await asyncio.sleep(1)
-
-    await browser.page.mouse.click(clan_btn["x"], clan_btn["y"])
-    log.info(f"Clicked CLAN button at ({clan_btn['x']}, {clan_btn['y']})")
-    await asyncio.sleep(4)
-
-    # ── Click Members ────────────────────────────────────────────────────
-    members_btn = get_element_coords(profile, "clan_panel", "sidebar_members")
-    if not members_btn:
-        # Try recalibrating from current state
-        log.warning("Members button not in calibration — recalibrating...")
-        members_btn = await recalibrate_element(
-            browser, config, "clan_panel", "sidebar_members"
-        )
-        if not members_btn:
-            log.error("Could not locate Members in clan sidebar.")
-            return []
-
-    await browser.page.mouse.click(members_btn["x"], members_btn["y"])
-    log.info(f"Clicked Members at ({members_btn['x']}, {members_btn['y']})")
-    await asyncio.sleep(3)
-
     # ── Scroll and extract ───────────────────────────────────────────────
-    all_members: dict[str, RosterMember] = {}  # name → member (dedup)
+    all_members: dict[str, RosterMember] = {}  # name_lower → member (dedup)
     page_num = 0
     max_pages = 20  # Safety limit
-
-    # Get scroll target from calibration
-    scroll_target = get_element_coords(profile, "members_view", "member_list_center")
-    if not scroll_target:
-        # Recalibrate from current state
-        scroll_target = await recalibrate_element(
-            browser, config, "members_view", "member_list_center"
-        )
-    if not scroll_target:
-        # Fallback to center of viewport
-        vp = config["game"].get("viewport", {"width": 1280, "height": 720})
-        scroll_target = {"x": vp["width"] // 2, "y": vp["height"] // 2}
-        log.warning(f"Using viewport center as scroll target: ({scroll_target['x']}, {scroll_target['y']})")
 
     while page_num < max_pages:
         # Screenshot current view
@@ -292,18 +247,11 @@ async def scan_clan_roster(browser, config: dict) -> list[RosterMember]:
             break
 
         # Scroll down
-        await browser.page.mouse.move(scroll_target["x"], scroll_target["y"])
-        await browser.page.mouse.wheel(0, 350)
-        await asyncio.sleep(2)
+        await browser.scroll_members_down()
         page_num += 1
 
     # ── Close panel ──────────────────────────────────────────────────────
-    close_btn = get_element_coords(profile, "clan_panel", "close_button")
-    if close_btn:
-        await browser.page.mouse.click(close_btn["x"], close_btn["y"])
-        await asyncio.sleep(1)
-    await browser.page.keyboard.press("Escape")
-    await asyncio.sleep(1)
+    await browser.navigate_back_to_main()
 
     result = list(all_members.values())
     log.info(f"Roster scan complete: {len(result)} unique members found.")

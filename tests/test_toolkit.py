@@ -130,6 +130,45 @@ class TestCalibration:
         # Members view needs scroll target
         assert "member_list_center" in CALIBRATION_SCREENS["members_view"]["elements"]
 
+    def test_normalize_coords_standard(self):
+        """Standard {"x": int, "y": int} format."""
+        from calibration import _normalize_coords
+        assert _normalize_coords({"x": 100, "y": 200}) == {"x": 100, "y": 200}
+
+    def test_normalize_coords_list(self):
+        """[x, y] list format."""
+        from calibration import _normalize_coords
+        assert _normalize_coords([100, 200]) == {"x": 100, "y": 200}
+
+    def test_normalize_coords_alternate_keys(self):
+        """center_x/center_y and other key patterns."""
+        from calibration import _normalize_coords
+        assert _normalize_coords({"center_x": 100, "center_y": 200}) == {"x": 100, "y": 200}
+        assert _normalize_coords({"left": 100, "top": 200}) == {"x": 100, "y": 200}
+
+    def test_normalize_coords_with_extras(self):
+        """Dict with x/y plus extra keys should still work."""
+        from calibration import _normalize_coords
+        result = _normalize_coords({"x": 100, "y": 200, "width": 50, "height": 50})
+        assert result == {"x": 100, "y": 200}
+
+    def test_normalize_coords_none(self):
+        from calibration import _normalize_coords
+        assert _normalize_coords(None) is None
+
+    def test_normalize_coords_invalid(self):
+        """Garbage input returns None."""
+        from calibration import _normalize_coords
+        assert _normalize_coords("not coords") is None
+        assert _normalize_coords(42) is None
+        assert _normalize_coords({}) is None
+        assert _normalize_coords({"only_x": 100}) is None
+
+    def test_normalize_coords_float_to_int(self):
+        """Float coordinates should be cast to int."""
+        from calibration import _normalize_coords
+        assert _normalize_coords({"x": 100.7, "y": 200.3}) == {"x": 100, "y": 200}
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Storage Tests

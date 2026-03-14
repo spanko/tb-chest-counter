@@ -1,0 +1,40 @@
+{
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "screens": {
+    "main_game": {
+      "elements": {
+        "bottom_nav_clan": {"x": 698, "y": 645}
+      },
+      "screenshot": "C:\\sourcenew\\repos\\spanko\\tb-chest-counter\\data\\screenshots\\calibration\\cal_01_main_game.png"
+    },
+    "clan_panel": {
+      "elements": {
+        "sidebar_gifts": {"x": 259, "y": 256},
+        "sidebar_members": {"x": 259, "y": 204},
+        "close_button": {"x": 1073, "y": 343}
+      },
+      "screenshot": "C:\\sourcenew\\repos\\spanko\\tb-chest-counter\\data\\screenshots\\calibration\\cal_02_clan_panel.png"
+    },
+    "gifts_view": {
+      "elements": {
+        "gift_list_center": {"x": 640, "y": 380},
+        "triumphal_gifts_tab": null,
+        "claim_button": null,
+        "first_gift_item": null
+      },
+      "screenshot": "C:\\sourcenew\\repos\\spanko\\tb-chest-counter\\data\\screenshots\\calibration\\cal_03_gifts_view.png"
+    }
+  },
+  "members_view": {
+    "elements": {
+      "member_list_center": {"x": 720, "y": 420},
+      "first_member_item": null,
+      "rank_filter_buttons": null
+    },
+    "screenshot": "C:\\sourcenew\\repos\\spanko\\tb-chest-counter\\data\\screenshots\\calibration\\recal_members_view_20260314_163037.png"
+  },
+  "calibrated_at": "2026-03-14T22:30:45.000000+00:00"
+}

@@ -124,6 +124,22 @@ async def cmd_chests(config: dict, visible: bool):
             logging.info(f"Page {page + 1}: {len(confirmed)} gifts confirmed by consensus")
 
             if not confirmed:
+                # Log what Vision reported for debugging
+                for i, ext in enumerate(all_extractions):
+                    if ext.extraction_notes:
+                        logging.warning(
+                            f"  Frame {i+1} notes: {ext.extraction_notes}"
+                        )
+                    logging.info(
+                        f"  Frame {i+1}: {len(ext.gifts)} raw gifts, "
+                        f"has_more={ext.has_more}, "
+                        f"total_count={ext.total_gift_count}"
+                    )
+                if page == 0:
+                    logging.warning(
+                        "No gifts on first page — verify navigation landed on "
+                        "the Gifts tab. Check debug screenshots in data/screenshots/debug/"
+                    )
                 logging.info("No gifts found on this page — stopping.")
                 break
 

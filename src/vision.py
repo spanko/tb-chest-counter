@@ -69,7 +69,11 @@ CONFIDENCE SCORING:
 - 1.0 = clearly readable, no ambiguity
 - 0.8-0.9 = mostly clear, minor uncertainty in one character
 - 0.5-0.7 = partially obscured or ambiguous
-- Below 0.5 = best guess, needs verification"""
+- Below 0.5 = best guess, needs verification
+
+IMPORTANT: If you do NOT see the Gifts tab or any gift entries (e.g., the screenshot shows
+a different screen, or the gift list is empty), return an empty gifts array and describe
+what you actually see in extraction_notes. This helps diagnose navigation issues."""
 
 USER_PROMPT = """Extract all visible gift/chest entries from this Total Battle Gifts tab screenshot.
 
@@ -186,6 +190,8 @@ def extract_gifts_from_screenshot(image_path: str, config: dict) -> GiftPageExtr
 
         result = GiftPageExtraction(**data)
         log.info(f"Extracted {len(result.gifts)} gifts from {Path(image_path).name}")
+        if not result.gifts and result.extraction_notes:
+            log.warning(f"No gifts found. Vision notes: {result.extraction_notes}")
         return result
 
     except json.JSONDecodeError as e:

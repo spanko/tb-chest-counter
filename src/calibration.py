@@ -163,6 +163,58 @@ Return a JSON object mapping element names to coordinates:
 
 # ── Calibration Functions ────────────────────────────────────────────────────
 
+def _normalize_coords(raw) -> Optional[dict]:
+    """Normalize coordinates from various Vision response formats.
+
+    Handles:
+        {"x": 123, "y": 456}                → {"x": 123, "y": 456}
+        [123, 456]                           → {"x": 123, "y": 456}
+        {"center_x": 123, "center_y": 456}  → {"x": 123, "y": 456}
+        {"left": 100, "top": 200, ...}      → {"x": 100, "y": 200}
+        null / None                          → None
+        anything else                        → None
+    """
+    if raw is None:
+        return None
+
+    if isinstance(raw, list) and len(raw) >= 2:
+        try:
+            return {"x": int(raw[0]), "y": int(raw[1])}
+        except (ValueError, TypeError):
+            return None
+
+    if isinstance(raw, dict):
+        # Direct x/y keys
+        if "x" in raw and "y" in raw:
+            try:
+                return {"x": int(raw["x"]), "y": int(raw["y"])}
+            except (ValueError, TypeError):
+                return None
+
+        # Alternate key patterns
+        x_keys = ["x", "center_x", "cx", "left", "pixel_x"]
+        y_keys = ["y", "center_y", "cy", "top", "pixel_y"]
+
+        x_val = None
+        y_val = None
+        for k in x_keys:
+            if k in raw:
+                x_val = raw[k]
+                break
+        for k in y_keys:
+            if k in raw:
+                y_val = raw[k]
+                break
+
+        if x_val is not None and y_val is not None:
+            try:
+                return {"x": int(x_val), "y": int(y_val)}
+            except (ValueError, TypeError):
+                return None
+
+    log.debug(f"Could not normalize coords: {raw}")
+    return None
+
 def load_calibration() -> Optional[dict]:
     """Load cached calibration profile from disk."""
     if CALIBRATION_FILE.exists():
@@ -281,14 +333,25 @@ async def locate_elements_in_screenshot(
         text = text.strip()
 
         result = json.loads(text)
-        log.info(f"  Calibration results for '{screen_name}':")
+
+        # Normalize coordinates — Vision may return various formats:
+        #   {"x": 123, "y": 456}           ← expected
+        #   [123, 456]                      ← list form
+        #   {"center_x": 123, "center_y": 456}  ← alternate keys
+        #   {"x": 123, "y": 456, "width": ...}  ← with extras (fine)
+        #   123                             ← just a number (broken)
+        normalized = {}
         for name, coords in result.items():
+            normalized[name] = _normalize_coords(coords)
+
+        log.info(f"  Calibration results for '{screen_name}':")
+        for name, coords in normalized.items():
             if coords:
                 log.info(f"    {name}: ({coords['x']}, {coords['y']})")
             else:
                 log.info(f"    {name}: NOT FOUND")
 
-        return result
+        return normalized
 
     except json.JSONDecodeError as e:
         log.error(f"Failed to parse calibration response: {e}")

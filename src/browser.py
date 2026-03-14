@@ -324,8 +324,83 @@ class TBBrowser:
 
     # ── Navigation (calibration-based) ──────────────────────────────────
 
+    async def verify_current_screen(self, expected: str) -> dict:
+        """Screenshot the current state and ask Vision what screen we're on.
+
+        Args:
+            expected: What we expect to see (e.g., "gifts tab with chest entries")
+
+        Returns:
+            {"on_expected_screen": bool, "description": str}
+        """
+        import base64
+        try:
+            import anthropic
+        except ImportError:
+            return {"on_expected_screen": True, "description": "anthropic not available"}
+
+        ss_path = await self._debug_screenshot(f"verify_{expected.replace(' ', '_')[:20]}")
+
+        api_key = self.config["vision"]["anthropic_api_key"]
+        model = self.config["vision"].get("model_routine", "claude-haiku-4-5-20251001")
+
+        with open(ss_path, "rb") as f:
+            image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+
+        client = anthropic.Anthropic(api_key=api_key)
+
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=300,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": image_data,
+                            },
+                        },
+                        {
+                            "type": "text",
+                            "text": (
+                                f"I expected to see: {expected}\n\n"
+                                "In 1-2 sentences, describe what this Total Battle screenshot "
+                                "actually shows. Then answer: is this the expected screen? "
+                                "Reply as JSON: {\"on_expected_screen\": true/false, "
+                                "\"description\": \"what you see\"}"
+                            ),
+                        },
+                    ],
+                }],
+            )
+
+            text = response.content[0].text.strip()
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+
+            import json
+            result = json.loads(text.strip())
+            log.info(f"Screen verification: {result.get('description', 'unknown')}")
+            return result
+
+        except Exception as e:
+            log.warning(f"Screen verification failed: {e}")
+            return {"on_expected_screen": True, "description": f"verification error: {e}"}
+
     async def navigate_to_gifts(self):
-        """Navigate to Clan → Gifts tab using calibrated coordinates."""
+        """Navigate to Clan → Gifts tab using calibrated coordinates.
+
+        Includes verification that we actually reached the gifts screen.
+        If not, retries once with fresh calibration.
+        """
         log.info("Navigating to Clan → Gifts...")
 
         for _ in range(3):
@@ -342,6 +417,29 @@ class TBBrowser:
         log.info(f"Clicking Gifts at ({gifts_btn['x']}, {gifts_btn['y']})")
         await self.page.mouse.click(gifts_btn["x"], gifts_btn["y"])
         await asyncio.sleep(3)
+
+        # Verify we're on the gifts screen
+        verify = await self.verify_current_screen(
+            "the Clan Gifts tab showing a list of chest gift entries with player names"
+        )
+        if not verify.get("on_expected_screen", True):
+            log.warning(f"NOT on gifts screen! Saw: {verify.get('description')}")
+            log.warning("Retrying with recalibration...")
+
+            # Close whatever we're on and retry
+            await self.page.keyboard.press("Escape")
+            await asyncio.sleep(1)
+
+            # Recalibrate the sidebar_gifts position from current clan panel
+            new_coords = await self._recalibrate("clan_panel", "sidebar_gifts")
+            if new_coords:
+                log.info(f"Recalibrated Gifts to ({new_coords['x']}, {new_coords['y']})")
+                # Re-open clan panel and try again
+                await self.page.mouse.click(clan_btn["x"], clan_btn["y"])
+                await asyncio.sleep(4)
+                await self.page.mouse.click(new_coords["x"], new_coords["y"])
+                await asyncio.sleep(3)
+
         log.info("Gifts tab opened.")
 
     async def navigate_to_members(self):
