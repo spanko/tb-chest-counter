@@ -1,5 +1,6 @@
 # Config with secrets
 config/settings.json
+.claude/settings.local.json
 
 # Data files
 data/*.db
@@ -8,6 +9,7 @@ data/*.log
 data/screenshots/
 data/exports/
 data/debug_*.png
+data/browser_data/
 
 # Test outputs
 test_output/

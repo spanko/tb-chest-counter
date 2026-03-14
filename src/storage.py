@@ -28,12 +28,19 @@ def load_chest_values() -> dict:
 
 def normalize_chest_type(raw: str, chest_values: dict) -> tuple[str, int]:
     """Normalize a chest type string and return (canonical_name, points).
-    
+
     Checks against known types and aliases.
     """
     raw_lower = raw.strip().lower()
 
     for canonical, info in chest_values.items():
+        # Skip metadata keys (start with _)
+        if canonical.startswith("_"):
+            continue
+        # Skip if info is not a dict (defensive check)
+        if not isinstance(info, dict):
+            continue
+
         if raw_lower == canonical.lower():
             return canonical, info.get("points", 1)
         for alias in info.get("aliases", []):

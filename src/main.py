@@ -199,11 +199,53 @@ def cmd_dashboard(config: dict):
     logging.info(f"Dashboard at http://{host}:{port}")
     app.run(host=host, port=port, debug=True)
 
+
+async def cmd_capture(config: dict, visible: bool):
+    """Test navigation and capture debug screenshots."""
+    from browser import TBBrowser
+
+    logging.info("Starting debug capture mode...")
+    logging.info("This will navigate through the UI and capture screenshots at each step.")
+
+    async with TBBrowser(config, headless=not visible) as browser:
+        try:
+            logging.info("Step 1: Login")
+            await browser.login()
+
+            logging.info("Step 2: Navigate to Gifts")
+            await browser.navigate_to_gifts()
+
+            logging.info("Step 3: Navigate to Triumphal Gifts")
+            await browser.navigate_to_triumphal_gifts()
+
+            logging.info("Step 4: Capture gift screenshots")
+            screenshots = await browser.capture_gift_screenshots(count=2)
+            for ss in screenshots:
+                logging.info(f"  Captured: {ss}")
+
+            logging.info("Step 5: Scroll down")
+            await browser.scroll_gifts_down()
+
+            logging.info("Step 6: Capture more screenshots after scroll")
+            screenshots = await browser.capture_gift_screenshots(count=1)
+            for ss in screenshots:
+                logging.info(f"  Captured: {ss}")
+
+            logging.info("Step 7: Navigate back to main")
+            await browser.navigate_back_to_main()
+
+            logging.info("\nDebug capture complete!")
+            logging.info(f"Screenshots saved to: {config['storage']['screenshot_dir']}/debug/")
+
+        except Exception as e:
+            logging.error(f"Error during capture: {e}", exc_info=True)
+            logging.info("Check the debug screenshots to see where the issue occurred.")
+
 # ── Main ────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="TB Toolkit — Chest Counter + Chat Bridge")
-    parser.add_argument("command", choices=["chests", "chat", "all", "export", "dashboard"],
+    parser.add_argument("command", choices=["chests", "chat", "all", "export", "dashboard", "capture"],
                         help="Which tool to run")
     parser.add_argument("--visible", action="store_true",
                         help="Show browser window (for calibration/debugging)")
@@ -233,6 +275,8 @@ def main():
         cmd_export(config)
     elif args.command == "dashboard":
         cmd_dashboard(config)
+    elif args.command == "capture":
+        asyncio.run(cmd_capture(config, args.visible))
 
 
 if __name__ == "__main__":

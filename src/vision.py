@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 class ChestGift(BaseModel):
     """A single gift/chest entry extracted from the screenshot."""
-    player_name: str = Field(description="Player name from the 'From:' field, exactly as displayed")
+    player_name: Optional[str] = Field(default=None, description="Player name from the 'From:' field, exactly as displayed")
     chest_type: str = Field(description="Full chest type name in bold, e.g. 'Forgotten Chest', 'Elven Citadel Chest'")
     source: Optional[str] = Field(default=None, description="Source field, e.g. 'Level 10 Crypt', 'Level 15 Citadel'")
     time_left: Optional[str] = Field(default=None, description="Time remaining, e.g. '18h 12m', '17h 53m'")
@@ -71,7 +71,26 @@ CONFIDENCE SCORING:
 - 0.5-0.7 = partially obscured or ambiguous
 - Below 0.5 = best guess, needs verification"""
 
-USER_PROMPT = "Extract all visible gift/chest entries from this Total Battle Gifts tab screenshot. Return a JSON object matching the GiftPageExtraction schema."
+USER_PROMPT = """Extract all visible gift/chest entries from this Total Battle Gifts tab screenshot.
+
+Return a JSON object with this EXACT structure:
+{
+  "gifts": [
+    {
+      "player_name": "PlayerName from 'From:' field",
+      "chest_type": "Full chest name from bold text",
+      "source": "Source text or null",
+      "time_left": "Time remaining or null",
+      "quantity": 1,
+      "confidence": 1.0
+    }
+  ],
+  "total_gift_count": null or number from badge,
+  "has_more": false,
+  "extraction_notes": ""
+}
+
+IMPORTANT: Use field name "player_name" NOT "from_player" or other variations."""
 
 # ── Extraction Functions ────────────────────────────────────────────────────
 
@@ -124,6 +143,7 @@ def extract_gifts_from_screenshot(image_path: str, config: dict) -> GiftPageExtr
 
         # Parse the response — Claude should return JSON matching our schema
         text = response.content[0].text
+        log.debug(f"Raw Claude response: {text[:1000]}")
 
         # Try to parse as JSON (Claude usually wraps in ```json blocks or returns raw)
         text = text.strip()
@@ -135,7 +155,35 @@ def extract_gifts_from_screenshot(image_path: str, config: dict) -> GiftPageExtr
             text = text[:-3]
         text = text.strip()
 
+        # Handle case where Claude adds explanatory text after JSON
+        # Find the first complete JSON object
+        if text.startswith("{"):
+            brace_count = 0
+            json_end = 0
+            for i, char in enumerate(text):
+                if char == "{":
+                    brace_count += 1
+                elif char == "}":
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_end = i + 1
+                        break
+            if json_end > 0:
+                text = text[:json_end]
+
         data = json.loads(text)
+        # Ensure has_more is a boolean, default to False if None
+        if "has_more" not in data or data["has_more"] is None:
+            data["has_more"] = False
+
+        # Filter out gifts without player_name (invalid extractions)
+        if "gifts" in data:
+            original_count = len(data["gifts"])
+            data["gifts"] = [g for g in data["gifts"] if g.get("player_name")]
+            filtered_count = original_count - len(data["gifts"])
+            if filtered_count > 0:
+                log.warning(f"Filtered out {filtered_count} gifts without player names")
+
         result = GiftPageExtraction(**data)
         log.info(f"Extracted {len(result.gifts)} gifts from {Path(image_path).name}")
         return result
