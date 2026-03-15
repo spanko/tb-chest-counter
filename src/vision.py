@@ -52,7 +52,7 @@ GIFT ENTRY LAYOUT (each entry is a row with):
 PAGE STRUCTURE:
 - Top: "Gifts" tab with a red badge showing total count (e.g., "23")
 - Middle: List of gift entries (typically 4 visible at once)
-- Bottom: "Delete expired chests" link and "Claim chests" button (if visible, this is the last page)
+- Bottom: "Delete expired chests" link and "Claim chests" button (only visible on the last page)
 
 EXTRACTION RULES:
 1. Extract EVERY visible gift entry. Do not skip any.
@@ -62,7 +62,8 @@ EXTRACTION RULES:
 4. Extract the source (e.g., "Level 10 Crypt", "Level 15 Citadel").
 5. Extract the time remaining (e.g., "18h 12m").
 6. If the red badge number is visible on the Gifts tab, include it as total_gift_count.
-7. Set has_more=false if you can see "Claim chests" or "Delete expired chests" at the bottom.
+7. IMPORTANT: Set has_more=true if you CANNOT see "Claim chests" or "Delete expired chests" at the bottom.
+   Set has_more=false ONLY when you can see these buttons (meaning this is the last page).
 8. If text is partially obscured or unclear, lower the confidence score.
 
 CONFIDENCE SCORING:
@@ -90,11 +91,14 @@ Return a JSON object with this EXACT structure:
     }
   ],
   "total_gift_count": null or number from badge,
-  "has_more": false,
+  "has_more": true if there are more gifts below (no "Claim chests" button visible),
   "extraction_notes": ""
 }
 
-IMPORTANT: Use field name "player_name" NOT "from_player" or other variations."""
+IMPORTANT:
+- Use field name "player_name" NOT "from_player" or other variations.
+- Set has_more=true when the list continues below and you CANNOT see the "Claim chests" button.
+- Set has_more=false ONLY when you can see the "Claim chests" or "Delete expired chests" buttons."""
 
 # ── Extraction Functions ────────────────────────────────────────────────────
 
