@@ -97,6 +97,13 @@ CALIBRATION_SCREENS = {
                     "Return the Y coordinate where the last visible gift entry ends."
                 ),
             },
+            "first_gift_open_button": {
+                "description": (
+                    "The green 'Open' button on the FIRST (topmost) gift entry in the list. "
+                    "This is the small green button on the right side of the first row. "
+                    "Return the CENTER of this button. Return null if no gifts are visible."
+                ),
+            },
             "triumphal_gifts_tab": {
                 "description": (
                     "The 'Triumphal Gifts' tab header/button, if visible. This is a tab at the top "

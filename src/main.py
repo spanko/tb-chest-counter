@@ -76,119 +76,211 @@ async def cmd_calibrate(config: dict, visible: bool):
         print("=" * 60)
 
 
-async def cmd_chests(config: dict, visible: bool, scroll_method: str = "wheel"):
-    """Run a single chest counter scan."""
+async def cmd_chests(config: dict, visible: bool, mode: str = "open"):
+    """Run a chest counter scan.
+
+    Two modes:
+        open   — Click "Open" on each gift, collecting rewards. Destructive
+                 but 100% reliable (no scrolling needed). DEFAULT.
+        scroll — Screenshot and scroll through the list without opening.
+                 Non-destructive but scrolling can be unreliable.
+    """
     from browser import TBBrowser
-    from vision import extract_gifts_from_screenshot, consensus_merge, validate_player_names
+    from vision import extract_gifts_from_screenshot
     from storage import Storage
 
     storage = Storage(config)
-    logging.info(f"Using scroll method: {scroll_method}")
+    logging.info(f"Chest scan mode: {mode}")
 
-    # Use DB roster if available, fall back to config
+    # Use DB roster if available
     roster = storage.get_active_roster()
-    if roster:
-        logging.info(f"Using DB roster: {len(roster)} active members")
-    else:
+    if not roster:
         roster = config["clan"].get("roster", [])
-        if roster:
-            logging.info(f"Using config roster: {len(roster)} members")
-        else:
-            logging.info("No roster available — skipping name validation")
+    if roster:
+        logging.info(f"Using roster: {len(roster)} members")
 
     async with TBBrowser(config, headless=not visible) as browser:
         await browser.login()
         await browser.navigate_to_gifts()
 
-        page = 0
-        max_pages = config["chest_counter"].get("max_pages", 10)
-        total_new = 0
-        all_seen_gifts = set()  # Track all gifts we've seen to detect when scrolling reaches the end
+        if mode == "open":
+            total_new = await _scan_by_opening(browser, config, storage, roster)
+        else:
+            total_new = await _scan_by_scrolling(browser, config, storage, roster)
 
-        while page < max_pages:
-            screenshots = await browser.capture_gift_screenshots(
-                count=config["chest_counter"].get("multi_frame_count", 2)
+    # ── Results summary ──────────────────────────────────────────────
+    _print_scan_summary(storage)
+
+
+async def _scan_by_opening(browser, config, storage, roster) -> int:
+    """Open each gift one by one from the top of the list.
+
+    Each "Open" click removes that gift and the next slides up.
+    No scrolling needed. Destructive (gifts are claimed).
+    """
+    from vision import extract_gifts_from_screenshot, validate_player_names
+
+    total_new = 0
+    gift_num = 0
+    max_gifts = 500  # Safety limit
+    consecutive_failures = 0
+    max_failures = 5  # Stop if we fail to open 5 times in a row
+    # Recalibrate the Open button every N gifts in case it drifts
+    recalibrate_interval = 25
+
+    while gift_num < max_gifts:
+        # Screenshot to extract the current top gift's data
+        screenshots = await browser.capture_gift_screenshots(count=1)
+        if not screenshots:
+            break
+
+        extraction = extract_gifts_from_screenshot(screenshots[0], config)
+        gifts = extraction.gifts
+
+        if not gifts:
+            if extraction.extraction_notes:
+                logging.info(f"  Vision notes: {extraction.extraction_notes}")
+            logging.info("No more gifts visible — done.")
+            break
+
+        # Record the top gift before opening it
+        top_gift = gifts[0]
+        logging.info(
+            f"Gift {gift_num + 1}: {top_gift.chest_type} "
+            f"from {top_gift.player_name} "
+            f"(time_left={top_gift.time_left})"
+        )
+
+        # Validate and store
+        to_store = [top_gift]
+        if roster:
+            to_store = validate_player_names(to_store, roster)
+        new_count = storage.store_gifts(to_store)
+        total_new += new_count
+
+        # Click "Open" on the first gift
+        opened = await browser.click_open_first_gift()
+        if not opened:
+            consecutive_failures += 1
+            logging.warning(f"  Failed to click Open ({consecutive_failures}/{max_failures})")
+            if consecutive_failures >= max_failures:
+                logging.error("Too many Open failures — stopping.")
+                break
+            # Try recalibrating
+            await browser.recalibrate_open_button()
+            continue
+
+        consecutive_failures = 0
+
+        # Dismiss the reward popup
+        await browser.dismiss_reward_popup()
+
+        # Periodically recalibrate the Open button position
+        if (gift_num + 1) % recalibrate_interval == 0:
+            logging.debug(f"Recalibrating Open button (every {recalibrate_interval} gifts)...")
+            await browser.recalibrate_open_button()
+
+        gift_num += 1
+
+    logging.info(f"Open scan complete: {gift_num} gifts opened, {total_new} new stored.")
+    return total_new
+
+
+async def _scan_by_scrolling(browser, config, storage, roster) -> int:
+    """Scroll through the gift list without opening. Non-destructive."""
+    from vision import extract_gifts_from_screenshot, validate_player_names
+
+    total_new = 0
+    page = 0
+    max_pages = 200
+    all_seen_keys = set()
+    stall_count = 0
+    max_stalls = 3
+
+    while page < max_pages:
+        screenshots = await browser.capture_gift_screenshots(count=1)
+        if not screenshots:
+            break
+
+        extraction = extract_gifts_from_screenshot(screenshots[0], config)
+        gifts = extraction.gifts
+
+        logging.info(f"Page {page + 1}: {len(gifts)} gifts extracted")
+
+        if not gifts:
+            if extraction.extraction_notes:
+                logging.warning(f"  Vision notes: {extraction.extraction_notes}")
+            if page == 0:
+                logging.warning("No gifts on first page — check data/screenshots/debug/")
+            break
+
+        new_on_page = 0
+        for g in gifts:
+            key = (
+                g.player_name.strip().lower(),
+                g.chest_type.strip().lower(),
+                (g.time_left or "").strip(),
             )
+            if key not in all_seen_keys:
+                all_seen_keys.add(key)
+                new_on_page += 1
 
-            if not screenshots:
-                logging.info("No screenshots captured — may have reached end of gifts.")
+        logging.info(f"  {new_on_page} new ({len(all_seen_keys)} total unique seen)")
+
+        if new_on_page == 0:
+            stall_count += 1
+            if stall_count >= max_stalls:
+                logging.info("Scroll stalled — reached end.")
                 break
+        else:
+            stall_count = 0
 
-            # Extract from each screenshot independently
-            all_extractions = []
-            for ss_path in screenshots:
-                extraction = extract_gifts_from_screenshot(ss_path, config)
-                all_extractions.append(extraction)
-                logging.debug(f"  Extracted {len(extraction.gifts)} gifts from {ss_path}")
+        if roster:
+            gifts = validate_player_names(gifts, roster)
 
-            # Consensus: keep gifts that appear in majority of frames
-            confirmed = consensus_merge(all_extractions)
-            logging.info(f"Page {page + 1}: {len(confirmed)} gifts confirmed by consensus")
+        new_count = storage.store_gifts(gifts)
+        total_new += new_count
+        logging.info(f"  → {new_count} stored")
 
-            # Create unique identifiers for the gifts on this page
-            current_page_gifts = set()
-            for gift in confirmed:
-                gift_id = f"{gift.player_name}_{gift.chest_type}_{gift.time_left}"
-                current_page_gifts.add(gift_id)
+        await browser.scroll_gifts_down()
+        page += 1
 
-            if not confirmed:
-                # Log what Vision reported for debugging
-                for i, ext in enumerate(all_extractions):
-                    if ext.extraction_notes:
-                        logging.warning(
-                            f"  Frame {i+1} notes: {ext.extraction_notes}"
-                        )
-                    logging.info(
-                        f"  Frame {i+1}: {len(ext.gifts)} raw gifts, "
-                        f"has_more={ext.has_more}, "
-                        f"total_count={ext.total_gift_count}"
-                    )
-                if page == 0:
-                    logging.warning(
-                        "No gifts on first page — verify navigation landed on "
-                        "the Gifts tab. Check debug screenshots in data/screenshots/debug/"
-                    )
-                logging.info("No gifts found on this page — stopping.")
-                break
+    logging.info(
+        f"Scroll scan complete: {total_new} new stored, "
+        f"{len(all_seen_keys)} unique seen across {page + 1} pages."
+    )
+    return total_new
 
-            # Check if we're seeing the same gifts we've already seen (means we've scrolled to the end)
-            if current_page_gifts.issubset(all_seen_gifts):
-                logging.info("All gifts on this page have been seen before — reached end of list.")
-                break
 
-            # Add current page gifts to our tracking set
-            all_seen_gifts.update(current_page_gifts)
+def _print_scan_summary(storage):
+    """Print a summary of what's in the database after a scan."""
+    lb = storage.get_leaderboard()
+    if not lb:
+        print("\nNo chest data in database yet.")
+        return
 
-            # Validate against roster if available
-            if roster:
-                confirmed = validate_player_names(confirmed, roster)
+    total_chests = sum(r["chest_count"] for r in lb)
+    total_points = sum(r["total_points"] for r in lb)
 
-            # Store with dedup
-            new_count = storage.store_gifts(confirmed)
-            total_new += new_count
-            logging.info(
-                f"  → {new_count} new gifts stored "
-                f"({len(confirmed) - new_count} duplicates skipped)"
-            )
-
-            # Always try to scroll if we found gifts, regardless of has_more flag
-            # The UI might show "Claim chests" button even when more gifts exist above
-            if confirmed:
-                logging.debug(f"Found gifts, scrolling to check for more using {scroll_method} method...")
-                await browser.scroll_gifts_down(method=scroll_method)
-                page += 1
-            else:
-                # Only stop if Vision says no more AND we found no gifts
-                has_more = any(e.has_more for e in all_extractions)
-                if not has_more:
-                    logging.info("No gifts found and Vision reports no more pages.")
-                    break
-                # If Vision says more but no gifts found, try scrolling anyway
-                logging.info(f"No gifts found but Vision reports more pages, scrolling using {scroll_method}...")
-                await browser.scroll_gifts_down(method=scroll_method)
-                page += 1
-
-        logging.info(f"Chest scan complete: {total_new} new gifts across {page + 1} pages.")
+    print("\n" + "=" * 60)
+    print("CHEST SCAN RESULTS")
+    print("=" * 60)
+    print(f"  Total chests in DB: {total_chests}")
+    print(f"  Total points:       {total_points}")
+    print(f"  Players:            {len(lb)}")
+    print()
+    print(f"  {'#':<4} {'Player':<25} {'Chests':>7} {'Points':>7}")
+    print(f"  {'-'*4} {'-'*25} {'-'*7} {'-'*7}")
+    for i, row in enumerate(lb[:20], 1):
+        print(
+            f"  {i:<4} {row['player_name']:<25} "
+            f"{row['chest_count']:>7} {row['total_points']:>7}"
+        )
+    if len(lb) > 20:
+        print(f"  ... and {len(lb) - 20} more players")
+    print("=" * 60)
+    print(f"\n  Dashboard: python main.py dashboard -> http://localhost:5000")
+    print(f"  CSV export: python main.py export")
 
 
 async def cmd_roster(config: dict, visible: bool):
@@ -341,9 +433,9 @@ def main():
                         help="Show browser window (for calibration/debugging)")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Debug-level logging")
-    parser.add_argument("--scroll", choices=["wheel", "drag", "keyboard", "click"],
-                        default="wheel",
-                        help="Scroll method for chest counter: wheel, drag, keyboard, or click")
+    parser.add_argument("--mode", choices=["open", "scroll"], default="open",
+                        help="Chest scan mode: 'open' claims each gift (default), "
+                             "'scroll' reads without opening")
     args = parser.parse_args()
 
     setup_logging(args.verbose)
@@ -361,7 +453,7 @@ def main():
     if args.command == "calibrate":
         asyncio.run(cmd_calibrate(config, args.visible))
     elif args.command == "chests":
-        asyncio.run(cmd_chests(config, args.visible, args.scroll))
+        asyncio.run(cmd_chests(config, args.visible, args.mode))
     elif args.command == "roster":
         asyncio.run(cmd_roster(config, args.visible))
     elif args.command == "chat":

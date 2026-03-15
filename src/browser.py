@@ -482,6 +482,50 @@ class TBBrowser:
         await asyncio.sleep(1)
         log.info("Closed clan panel.")
 
+    # ── Open-and-collect approach ───────────────────────────────────────
+
+    async def click_open_first_gift(self) -> bool:
+        """Click the 'Open' button on the first (topmost) gift in the list.
+
+        Returns:
+            True if we clicked something, False if no Open button found.
+        """
+        open_btn = self._get_coords_or_none("gifts_view", "first_gift_open_button")
+
+        if not open_btn:
+            # Try to locate it dynamically from current screenshot
+            log.info("Open button not calibrated — locating from current screen...")
+            open_btn = await self._recalibrate("gifts_view", "first_gift_open_button")
+
+        if not open_btn:
+            log.warning("Could not find Open button on first gift.")
+            return False
+
+        log.debug(f"Clicking Open at ({open_btn['x']}, {open_btn['y']})")
+        await self.page.mouse.click(open_btn["x"], open_btn["y"])
+        await asyncio.sleep(0.05)  # Minimal pause for click to register
+        return True
+
+    async def dismiss_reward_popup(self):
+        """Wait for the reward popup to fade, then continue.
+
+        The reward popup shows what you got but doesn't block interaction.
+        We can click through it to open the next gift.
+        """
+        # Minimal pause - we can click through the reward popup
+        await asyncio.sleep(0.15)
+        log.debug("Brief pause for reward popup.")
+
+    async def recalibrate_open_button(self):
+        """Re-locate the Open button after the gift list shifts.
+
+        After opening a gift, the next gift slides into the top position.
+        The Open button should be in roughly the same spot, but we
+        recalibrate periodically to stay accurate.
+        """
+        coords = await self._recalibrate("gifts_view", "first_gift_open_button")
+        return coords
+
     async def scroll_gifts_down(self, method="wheel"):
         """Scroll the gift list down using various methods.
 
@@ -628,7 +672,7 @@ class TBBrowser:
             paths.append(str(fpath))
             log.debug(f"Screenshot saved: {fpath}")
             if i < count - 1:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.1)
 
         return paths
 
