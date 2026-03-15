@@ -1,0 +1,252 @@
+## ============================================================================
+## TB Chest Counter — CI/CD Pipeline
+## Build → Smoke Test → Promote → Deploy
+##
+## Triggers on push to main (src/ or Dockerfile changes).
+## Manual dispatch available for force-deploy or smoke-test-only.
+## ============================================================================
+
+name: Build & Deploy Scanner
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'config/**'
+      - 'Dockerfile'
+      - 'requirements.txt'
+  workflow_dispatch:
+    inputs:
+      skip_smoke:
+        description: 'Skip smoke test (emergency deploy)'
+        type: boolean
+        default: false
+      smoke_only:
+        description: 'Run smoke test only, do not promote'
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
+  IMAGE_NAME: tb-chest-scanner
+  RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+  ACA_ENVIRONMENT: ${{ secrets.ACA_ENVIRONMENT_NAME }}
+
+permissions:
+  id-token: write    # OIDC for Azure login
+  contents: read
+
+jobs:
+
+  # ── Build & Push ──────────────────────────────────────────────────────────
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image_sha: ${{ steps.meta.outputs.sha_tag }}
+      image_candidate: ${{ steps.meta.outputs.candidate_tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR Login
+        run: az acr login --name ${{ secrets.ACR_NAME }}
+
+      - name: Generate image tags
+        id: meta
+        run: |
+          SHA_SHORT=$(echo "${{ github.sha }}" | head -c 7)
+          echo "sha_tag=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "candidate_tag=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:candidate" >> "$GITHUB_OUTPUT"
+          echo "sha_short=${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        run: |
+          docker build \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            -t ${{ steps.meta.outputs.sha_tag }} \
+            -t ${{ steps.meta.outputs.candidate_tag }} \
+            .
+          docker push ${{ steps.meta.outputs.sha_tag }}
+          docker push ${{ steps.meta.outputs.candidate_tag }}
+
+      - name: Summary
+        run: |
+          echo "### 📦 Image built" >> $GITHUB_STEP_SUMMARY
+          echo "- SHA tag: \`${{ steps.meta.outputs.sha_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Candidate tag: \`${{ steps.meta.outputs.candidate_tag }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # ── Smoke Test ────────────────────────────────────────────────────────────
+  # Runs the candidate image against a real TB login in dry-run mode.
+  # Logs in, navigates to Gifts, screenshots, runs Vision extraction,
+  # but writes to smoke_test_runs table — never touches real chest data.
+  smoke-test:
+    needs: build
+    if: ${{ !inputs.skip_smoke }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run smoke test as ACA Job
+        id: smoke
+        run: |
+          # Trigger a one-off execution of the smoke-test job with the candidate image.
+          # The smoke-test ACA Job is pre-deployed via Bicep with SCAN_MODE=smoke.
+
+          echo "→ Starting smoke test job execution..."
+          az containerapp job start \
+            --name tb-smoke-test \
+            --resource-group "${{ env.RESOURCE_GROUP }}" \
+            --image "${{ needs.build.outputs.image_candidate }}" \
+            --output json > /tmp/smoke_start.json
+
+          EXECUTION_NAME=$(jq -r '.name' /tmp/smoke_start.json)
+          echo "execution_name=${EXECUTION_NAME}" >> "$GITHUB_OUTPUT"
+          echo "→ Execution started: ${EXECUTION_NAME}"
+
+      - name: Wait for smoke test completion
+        run: |
+          EXECUTION_NAME="${{ steps.smoke.outputs.execution_name }}"
+          echo "→ Waiting for ${EXECUTION_NAME}..."
+
+          for i in $(seq 1 60); do
+            STATUS=$(az containerapp job execution show \
+              --name tb-smoke-test \
+              --resource-group "${{ env.RESOURCE_GROUP }}" \
+              --job-execution-name "${EXECUTION_NAME}" \
+              --query 'properties.status' -o tsv 2>/dev/null || echo "Running")
+
+            echo "  Attempt ${i}/60: ${STATUS}"
+
+            case "$STATUS" in
+              Succeeded)
+                echo "✅ Smoke test passed"
+                exit 0
+                ;;
+              Failed)
+                echo "❌ Smoke test failed"
+                # Fetch logs for debugging
+                az containerapp job execution show \
+                  --name tb-smoke-test \
+                  --resource-group "${{ env.RESOURCE_GROUP }}" \
+                  --job-execution-name "${EXECUTION_NAME}" \
+                  --output json | jq '.properties'
+                exit 1
+                ;;
+              *)
+                sleep 15
+                ;;
+            esac
+          done
+
+          echo "❌ Smoke test timed out after 15 minutes"
+          exit 1
+
+      - name: Fetch smoke test screenshots
+        if: always()
+        run: |
+          # Pull screenshots from the smoke test run for review
+          # These are saved to blob storage by the scanner in smoke mode
+          echo "→ Fetching smoke screenshots..."
+          az storage blob download-batch \
+            --source smoke-screenshots \
+            --destination ./smoke-output \
+            --account-name ${{ secrets.STORAGE_ACCOUNT }} \
+            --auth-mode login \
+            --pattern "$(date +%Y%m%d)*" 2>/dev/null || echo "No screenshots found"
+
+      - name: Upload screenshots as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-screenshots-${{ github.run_id }}
+          path: smoke-output/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Smoke test summary
+        if: always()
+        run: |
+          echo "### 🔬 Smoke test" >> $GITHUB_STEP_SUMMARY
+          echo "- Image: \`${{ needs.build.outputs.image_candidate }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Screenshots: See artifacts tab" >> $GITHUB_STEP_SUMMARY
+
+  # ── Promote & Deploy ──────────────────────────────────────────────────────
+  # Retags candidate → production, updates all ACA Job definitions.
+  promote:
+    needs: [build, smoke-test]
+    if: ${{ !inputs.smoke_only && (success() || inputs.skip_smoke) }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR Login
+        run: az acr login --name ${{ secrets.ACR_NAME }}
+
+      - name: Promote candidate → production
+        run: |
+          SHA_TAG="${{ needs.build.outputs.image_sha }}"
+
+          echo "→ Tagging ${SHA_TAG} as :production"
+          docker pull "${SHA_TAG}"
+          docker tag "${SHA_TAG}" "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:production"
+          docker push "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:production"
+
+          # Also tag as :latest for convenience
+          docker tag "${SHA_TAG}" "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          docker push "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+
+      - name: Update ACA Jobs to use new image
+        run: |
+          SHA_TAG="${{ needs.build.outputs.image_sha }}"
+
+          # Find all scanner jobs in the environment
+          JOBS=$(az containerapp job list \
+            --resource-group "${{ env.RESOURCE_GROUP }}" \
+            --query "[?contains(name, 'scan-')].name" -o tsv)
+
+          for JOB_NAME in $JOBS; do
+            echo "→ Updating ${JOB_NAME} → ${SHA_TAG}"
+            az containerapp job update \
+              --name "${JOB_NAME}" \
+              --resource-group "${{ env.RESOURCE_GROUP }}" \
+              --image "${SHA_TAG}" \
+              --output none
+            echo "  ✅ ${JOB_NAME} updated"
+          done
+
+      - name: Deployment summary
+        run: |
+          SHA_TAG="${{ needs.build.outputs.image_sha }}"
+          echo "### 🚀 Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "- Image: \`${SHA_TAG}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Jobs updated:" >> $GITHUB_STEP_SUMMARY
+          az containerapp job list \
+            --resource-group "${{ env.RESOURCE_GROUP }}" \
+            --query "[?contains(name, 'scan-')].name" -o tsv | \
+            while read JOB; do echo "  - \`${JOB}\`" >> $GITHUB_STEP_SUMMARY; done
