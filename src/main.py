@@ -17,11 +17,10 @@ import json
 import logging
 import os
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import load_config, Config
+from config import load_config
 
 log = logging.getLogger("tb-scanner")
 
@@ -37,55 +36,51 @@ def setup_logging(verbose: bool = False):
 
 # ── Chest Scanner ───────────────────────────────────────────────────────────
 
-async def run_chest_scan(config: Config):
-    """Execute a single chest scan cycle.
-
-    1. Launch Playwright, login to TB
-    2. Navigate to Clan → Gifts
-    3. Screenshot each page → Claude Vision → structured JSON
-    4. Deduplicate and store in PostgreSQL (cloud) or SQLite (local)
-    5. Scroll → repeat until no more gifts
-    """
+async def run_chest_scan(config: dict):
+    """Execute a single chest scan cycle."""
     from browser import TBBrowser
     from vision import extract_gifts_from_screenshot, verify_with_stronger_model
 
+    cloud_mode = config.get("_cloud_mode", False)
+    clan_id = config.get("_clan_id", "local")
+    vision_cfg = config.get("vision", {})
+    scan_cfg = config.get("chest_counter", {})
+
     # Select storage backend
-    if config.cloud_mode:
+    if cloud_mode:
         from storage_pg import Storage
     else:
         from storage import Storage
 
     storage = Storage(config)
-    run_id = storage.start_run(config.vision.model_routine)
+    run_id = storage.start_run(vision_cfg.get("model_routine", "claude-haiku-4-5-20251001"))
 
     total_found = 0
     total_new = 0
     total_pages = 0
     total_cost = 0.0
+    headless = config.get("_headless", True)
 
     try:
-        async with TBBrowser(config, headless=config.headless) as browser:
+        async with TBBrowser(config, headless=headless) as browser:
             await browser.login()
             await browser.navigate_to_gifts()
 
             roster = storage.get_roster()
 
             page = 0
-            while page < config.scan.max_pages:
-                # Capture screenshots (multi-frame for consensus)
-                screenshots = await browser.capture_gift_screenshots(
-                    count=config.scan.multi_frame_count
-                )
+            max_pages = scan_cfg.get("max_pages", 10)
+            multi_frame = scan_cfg.get("multi_frame_count", 2)
+
+            while page < max_pages:
+                screenshots = await browser.capture_gift_screenshots(count=multi_frame)
 
                 if not screenshots:
                     log.info("No screenshots captured — end of gifts or navigation issue.")
                     break
 
-                # Extract gifts from primary screenshot
                 primary_screenshot = screenshots[0]
-                result = extract_gifts_from_screenshot(
-                    primary_screenshot, config
-                )
+                result = extract_gifts_from_screenshot(primary_screenshot, config)
 
                 if not result.gifts:
                     log.info(f"Page {page + 1}: No gifts found — end of list.")
@@ -93,21 +88,20 @@ async def run_chest_scan(config: Config):
 
                 log.info(f"Page {page + 1}: Extracted {len(result.gifts)} gifts")
 
-                # Process each gift
                 for gift in result.gifts:
                     gift_dict = gift.model_dump() if hasattr(gift, 'model_dump') else gift.dict()
                     total_found += 1
 
                     # Verify low-confidence extractions with Sonnet
-                    if gift.confidence < config.vision.verify_threshold:
+                    threshold = float(vision_cfg.get("verify_threshold", 0.85))
+                    if gift.confidence < threshold:
                         log.info(
                             f"Low confidence ({gift.confidence:.0%}) for "
-                            f"{gift.player_name}/{gift.chest_type} — verifying with {config.vision.model_verify}"
+                            f"{gift.player_name}/{gift.chest_type} — verifying"
                         )
                         verified_result = verify_with_stronger_model(
                             primary_screenshot, config
                         )
-                        # Find matching gift in verified result
                         for vgift in verified_result.gifts:
                             if vgift.player_name == gift.player_name:
                                 gift_dict = vgift.model_dump() if hasattr(vgift, 'model_dump') else vgift.dict()
@@ -121,29 +115,25 @@ async def run_chest_scan(config: Config):
                         if matched:
                             gift_dict["player_name"] = matched
 
-                    # Store screenshot reference
                     gift_dict["screenshot_ref"] = str(primary_screenshot)
 
-                    # Store with deduplication
                     is_new = storage.store_chest(run_id, gift_dict)
                     if is_new:
                         total_new += 1
 
                 total_pages += 1
 
-                # Check if more pages
                 if not result.has_more:
                     log.info("No more gifts indicated — scan complete.")
                     break
 
-                # Scroll to next page
                 await browser.scroll_gifts_down()
                 page += 1
 
         storage.complete_run(run_id, total_pages, total_found, total_new, total_cost)
         log.info(
             f"Scan complete: {total_pages} pages, {total_found} gifts found, "
-            f"{total_new} new (clan: {config.clan_id})"
+            f"{total_new} new (clan: {clan_id})"
         )
 
     except Exception as e:
@@ -155,10 +145,7 @@ async def run_chest_scan(config: Config):
 
 
 def _fuzzy_match(name: str, roster: list[str], threshold: int = 80) -> str | None:
-    """Fuzzy match a player name against the clan roster.
-
-    Returns the best match if above threshold, else None.
-    """
+    """Fuzzy match a player name against the clan roster."""
     try:
         from thefuzz import fuzz
     except ImportError:
@@ -181,39 +168,34 @@ def _fuzzy_match(name: str, roster: list[str], threshold: int = 80) -> str | Non
 
 # ── Smoke Test ──────────────────────────────────────────────────────────────
 
-async def run_smoke_test(config: Config):
-    """Smoke test: login, navigate, screenshot, extract — but don't store chests.
-
-    Validates the full pipeline without writing to the chests table.
-    Writes results to smoke_test_runs table and saves screenshots.
-
-    Exit codes:
-        0 = smoke passed (login + nav + vision extraction all worked)
-        1 = smoke failed (something broke)
-    """
+async def run_smoke_test(config: dict):
+    """Smoke test: login, navigate, screenshot, extract — but don't store chests."""
     from browser import TBBrowser
     from vision import extract_gifts_from_screenshot
 
-    # Ensure screenshot dir exists
-    screenshot_dir = Path(config.screenshot_dir or "/tmp/smoke-screenshots")
+    cloud_mode = config.get("_cloud_mode", False)
+    clan_id = config.get("_clan_id", "local")
+    vision_cfg = config.get("vision", {})
+    headless = config.get("_headless", True)
+
+    screenshot_dir = Path(config.get("storage", {}).get("screenshot_dir", "/tmp/smoke-screenshots"))
     screenshot_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     results = {
-        "clan_id": config.clan_id,
+        "clan_id": clan_id,
         "timestamp": timestamp,
         "steps": {},
         "passed": False,
     }
 
     try:
-        async with TBBrowser(config, headless=config.headless) as browser:
+        async with TBBrowser(config, headless=headless) as browser:
             # Step 1: Login
             log.info("[smoke] Step 1: Login...")
             await browser.login()
             results["steps"]["login"] = "passed"
 
-            # Save post-login screenshot
             login_shot = screenshot_dir / f"smoke_{timestamp}_01_login.png"
             await browser.page.screenshot(path=str(login_shot))
             log.info(f"[smoke] Screenshot: {login_shot}")
@@ -243,11 +225,10 @@ async def run_smoke_test(config: Config):
             results["has_more"] = result.has_more
             results["extraction_notes"] = result.extraction_notes
 
-            # Log what we found (but don't store)
             for gift in result.gifts:
                 log.info(f"[smoke]   {gift.player_name} / {gift.chest_type} (conf: {gift.confidence})")
 
-            # Step 4: Scroll test (verify scrolling works, capture page 2)
+            # Step 4: Scroll test
             if result.has_more:
                 log.info("[smoke] Step 4: Scroll test...")
                 await browser.scroll_gifts_down()
@@ -259,29 +240,27 @@ async def run_smoke_test(config: Config):
                 results["steps"]["scroll"] = "skipped — no more gifts"
 
         results["passed"] = True
-        log.info(f"[smoke] ✅ All steps passed. {results['gifts_extracted']} gifts extracted.")
+        log.info(f"[smoke] All steps passed. {results.get('gifts_extracted', 0)} gifts extracted.")
 
     except Exception as e:
-        log.error(f"[smoke] ❌ Failed: {e}", exc_info=True)
+        log.error(f"[smoke] Failed: {e}", exc_info=True)
         results["error"] = str(e)
         results["passed"] = False
 
-    # Write results JSON for CI to inspect
+    # Write results JSON
     results_path = screenshot_dir / f"smoke_{timestamp}_results.json"
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
     log.info(f"[smoke] Results: {results_path}")
 
-    # If in cloud mode, record in database
-    if config.cloud_mode:
+    # Record in database if cloud mode
+    if cloud_mode:
         try:
             from storage_pg import Storage
             storage = Storage(config)
-            run_id = storage.start_run(f"smoke:{config.vision.model_routine}")
+            run_id = storage.start_run(f"smoke:{vision_cfg.get('model_routine', 'unknown')}")
             if results["passed"]:
-                storage.complete_run(
-                    run_id, 1, results.get("gifts_extracted", 0), 0
-                )
+                storage.complete_run(run_id, 1, results.get("gifts_extracted", 0), 0)
             else:
                 storage.fail_run(run_id, results.get("error", "unknown"))
             storage.close()
@@ -298,17 +277,15 @@ async def run_smoke_test(config: Config):
 
 
 def _upload_smoke_screenshots(screenshot_dir: Path, timestamp: str, conn_string: str):
-    """Upload smoke screenshots to Azure Blob Storage for CI artifact retrieval."""
+    """Upload smoke screenshots to Azure Blob Storage."""
     try:
         from azure.storage.blob import BlobServiceClient
         client = BlobServiceClient.from_connection_string(conn_string)
         container = client.get_container_client("smoke-screenshots")
-
         for f in screenshot_dir.glob(f"smoke_{timestamp}*"):
-            blob_name = f.name
             with open(f, "rb") as data:
-                container.upload_blob(blob_name, data, overwrite=True)
-            log.info(f"[smoke] Uploaded {blob_name} to blob storage")
+                container.upload_blob(f.name, data, overwrite=True)
+            log.info(f"[smoke] Uploaded {f.name} to blob storage")
     except ImportError:
         log.warning("[smoke] azure-storage-blob not installed — skipping upload")
     except Exception as e:
@@ -330,13 +307,13 @@ def main():
     args = parser.parse_args()
     setup_logging(args.verbose)
 
-    # Smoke mode can also be triggered by SCAN_MODE=smoke env var (for ACA Job override)
+    # Smoke mode can also be triggered by SCAN_MODE=smoke env var
     scan_mode = os.environ.get("SCAN_MODE", args.command)
 
     config = load_config(cloud=args.cloud)
 
-    if args.visible:
-        config.headless = False
+    # Set headless based on --visible flag
+    config["_headless"] = not args.visible
 
     if scan_mode == "chests":
         asyncio.run(run_chest_scan(config))
@@ -345,7 +322,7 @@ def main():
         asyncio.run(run_smoke_test(config))
 
     elif args.command == "export":
-        if config.cloud_mode:
+        if config.get("_cloud_mode"):
             log.error("Export is for local mode only. Use the dashboard in cloud mode.")
             sys.exit(1)
         from storage import Storage
