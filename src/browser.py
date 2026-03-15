@@ -197,6 +197,12 @@ class TBBrowser:
         username = self.config["game"]["username"]
         password = self.config["game"]["password"]
 
+        # Dismiss any popups that might block the login form
+        try:
+            await self._dismiss_popups()
+        except Exception:
+            pass
+
         # Step 1: Click "Log In" link (HTML, not canvas)
         log.info("Looking for 'Log In' link...")
         try:
@@ -212,6 +218,19 @@ class TBBrowser:
                 log.info("Clicked 'Log in' link")
                 clicked = True
                 await asyncio.sleep(3)
+
+                # Wait for the email input to actually appear after clicking
+                log.info("Waiting for email input field to appear...")
+                try:
+                    await self.page.wait_for_selector(
+                        "input[type='email'], input[placeholder*='mail' i], input[name='email'], input[placeholder='Email']",
+                        timeout=10000
+                    )
+                    log.info("Email input field detected")
+                except Exception as e:
+                    log.warning(f"Timeout waiting for email input: {e}")
+                    # Take a debug screenshot to see what's on screen
+                    await self._debug_screenshot("login_form_missing")
         except Exception as e:
             log.warning(f"Failed to click 'Log in': {e}")
 
@@ -234,6 +253,7 @@ class TBBrowser:
                         await el.click()
                         await asyncio.sleep(0.5)
                         await el.fill(username)
+                        log.info(f"Entered email using selector: {sel}")
                         email_filled = True
                         break
                 except Exception:
@@ -241,6 +261,8 @@ class TBBrowser:
 
         if not email_filled:
             log.error("Could not find email input.")
+            # Take debug screenshot to see current state
+            await self._debug_screenshot("email_input_not_found")
             if not self.headless:
                 log.info("=" * 60)
                 log.info("MANUAL LOGIN REQUIRED")
@@ -292,8 +314,17 @@ class TBBrowser:
         try:
             await self.page.wait_for_selector("canvas", timeout=60000)
             log.info("Canvas detected")
-        except Exception:
-            log.warning("No canvas after 60s")
+        except Exception as e:
+            log.warning(f"No canvas after 60s: {e}")
+            # Take debug screenshot to see where we ended up
+            await self._debug_screenshot("post_login_no_canvas")
+            # Check if we're still on login page
+            try:
+                if await self.page.locator("input[type='email'], input[placeholder='Email']").first.is_visible(timeout=1000):
+                    log.error("Still on login page - login likely failed")
+                    await self._debug_screenshot("still_on_login_page")
+            except:
+                pass
 
         log.info("Waiting for game to fully load after login (30 seconds)...")
         await asyncio.sleep(30)  # Give game more time to fully load
