@@ -76,13 +76,14 @@ async def cmd_calibrate(config: dict, visible: bool):
         print("=" * 60)
 
 
-async def cmd_chests(config: dict, visible: bool):
+async def cmd_chests(config: dict, visible: bool, scroll_method: str = "wheel"):
     """Run a single chest counter scan."""
     from browser import TBBrowser
     from vision import extract_gifts_from_screenshot, consensus_merge, validate_player_names
     from storage import Storage
 
     storage = Storage(config)
+    logging.info(f"Using scroll method: {scroll_method}")
 
     # Use DB roster if available, fall back to config
     roster = storage.get_active_roster()
@@ -102,6 +103,7 @@ async def cmd_chests(config: dict, visible: bool):
         page = 0
         max_pages = config["chest_counter"].get("max_pages", 10)
         total_new = 0
+        all_seen_gifts = set()  # Track all gifts we've seen to detect when scrolling reaches the end
 
         while page < max_pages:
             screenshots = await browser.capture_gift_screenshots(
@@ -123,6 +125,12 @@ async def cmd_chests(config: dict, visible: bool):
             confirmed = consensus_merge(all_extractions)
             logging.info(f"Page {page + 1}: {len(confirmed)} gifts confirmed by consensus")
 
+            # Create unique identifiers for the gifts on this page
+            current_page_gifts = set()
+            for gift in confirmed:
+                gift_id = f"{gift.player_name}_{gift.chest_type}_{gift.time_left}"
+                current_page_gifts.add(gift_id)
+
             if not confirmed:
                 # Log what Vision reported for debugging
                 for i, ext in enumerate(all_extractions):
@@ -143,6 +151,14 @@ async def cmd_chests(config: dict, visible: bool):
                 logging.info("No gifts found on this page — stopping.")
                 break
 
+            # Check if we're seeing the same gifts we've already seen (means we've scrolled to the end)
+            if current_page_gifts.issubset(all_seen_gifts):
+                logging.info("All gifts on this page have been seen before — reached end of list.")
+                break
+
+            # Add current page gifts to our tracking set
+            all_seen_gifts.update(current_page_gifts)
+
             # Validate against roster if available
             if roster:
                 confirmed = validate_player_names(confirmed, roster)
@@ -155,14 +171,22 @@ async def cmd_chests(config: dict, visible: bool):
                 f"({len(confirmed) - new_count} duplicates skipped)"
             )
 
-            # Check if there are more pages
-            has_more = any(e.has_more for e in all_extractions)
-            if not has_more:
-                logging.info("No more gift pages.")
-                break
-
-            await browser.scroll_gifts_down()
-            page += 1
+            # Always try to scroll if we found gifts, regardless of has_more flag
+            # The UI might show "Claim chests" button even when more gifts exist above
+            if confirmed:
+                logging.debug(f"Found gifts, scrolling to check for more using {scroll_method} method...")
+                await browser.scroll_gifts_down(method=scroll_method)
+                page += 1
+            else:
+                # Only stop if Vision says no more AND we found no gifts
+                has_more = any(e.has_more for e in all_extractions)
+                if not has_more:
+                    logging.info("No gifts found and Vision reports no more pages.")
+                    break
+                # If Vision says more but no gifts found, try scrolling anyway
+                logging.info(f"No gifts found but Vision reports more pages, scrolling using {scroll_method}...")
+                await browser.scroll_gifts_down(method=scroll_method)
+                page += 1
 
         logging.info(f"Chest scan complete: {total_new} new gifts across {page + 1} pages.")
 
@@ -317,6 +341,9 @@ def main():
                         help="Show browser window (for calibration/debugging)")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Debug-level logging")
+    parser.add_argument("--scroll", choices=["wheel", "drag", "keyboard", "click"],
+                        default="wheel",
+                        help="Scroll method for chest counter: wheel, drag, keyboard, or click")
     args = parser.parse_args()
 
     setup_logging(args.verbose)
@@ -334,7 +361,7 @@ def main():
     if args.command == "calibrate":
         asyncio.run(cmd_calibrate(config, args.visible))
     elif args.command == "chests":
-        asyncio.run(cmd_chests(config, args.visible))
+        asyncio.run(cmd_chests(config, args.visible, args.scroll))
     elif args.command == "roster":
         asyncio.run(cmd_roster(config, args.visible))
     elif args.command == "chat":

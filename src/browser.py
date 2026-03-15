@@ -482,18 +482,113 @@ class TBBrowser:
         await asyncio.sleep(1)
         log.info("Closed clan panel.")
 
-    async def scroll_gifts_down(self):
-        """Scroll the gift list down using calibrated list center."""
-        target = self._get_coords_or_none("gifts_view", "gift_list_center")
-        if not target:
-            vp = self.config["game"].get("viewport", {"width": 1280, "height": 720})
-            target = {"x": vp["width"] // 2, "y": vp["height"] // 2}
-            log.warning("Gift list center not calibrated — using viewport center")
+    async def scroll_gifts_down(self, method="wheel"):
+        """Scroll the gift list down using various methods.
 
-        await self.page.mouse.move(target["x"], target["y"])
-        await self.page.mouse.wheel(0, 350)
-        await asyncio.sleep(2)
-        log.debug("Scrolled gifts list down.")
+        Args:
+            method: "wheel" (mouse wheel), "drag" (drag scrollbar),
+                   "keyboard" (Page Down key), or "click" (click scrollbar track)
+        """
+        if method == "wheel":
+            # Original mouse wheel approach
+            target = self._get_coords_or_none("gifts_view", "gift_list_center")
+            if not target:
+                vp = self.config["game"].get("viewport", {"width": 1280, "height": 720})
+                target = {"x": vp["width"] // 2, "y": vp["height"] // 2}
+                log.warning("Gift list center not calibrated — using viewport center")
+
+            await self.page.mouse.move(target["x"], target["y"])
+            # Multiple smaller scrolls work better than one large scroll
+            for _ in range(5):
+                await self.page.mouse.wheel(0, 300)
+                await asyncio.sleep(0.2)
+            await asyncio.sleep(1.5)
+            log.debug("Scrolled gifts list down using mouse wheel (5x300px).")
+
+        elif method == "drag":
+            # Drag the scrollbar handle down
+            # User confirmed: scrollbar is at X=1100, handle is ~50px tall
+            scrollbar_x = 1100  # Exact X position from user
+
+            # Dynamic handle position tracking
+            # As we scroll, the handle moves down, so we need to adjust where we grab it
+            # Start at the top for first scroll, then progressively lower
+            if not hasattr(self, '_scroll_position'):
+                self._scroll_position = 0
+
+            # AGGRESSIVE SCROLLING STRATEGY:
+            # The scrollbar track runs from Y=275 to Y=525 (250px total)
+            # With 130 gifts and only 4 visible at a time, we need to scroll through ~126 more
+            # That's about 32 pages of 4 gifts each
+            # So we should scroll in much larger increments
+
+            if self._scroll_position == 0:
+                # First scroll: grab at top, drag halfway down
+                scrollbar_handle_y = 275
+                drag_distance = 125  # Half the scrollbar
+            elif self._scroll_position == 1:
+                # Second scroll: grab at middle, drag to 3/4 down
+                scrollbar_handle_y = 400
+                drag_distance = 100
+            elif self._scroll_position == 2:
+                # Third scroll: grab at 3/4, drag to bottom
+                scrollbar_handle_y = 475
+                drag_distance = 75
+            else:
+                # Subsequent scrolls: small increments at the bottom
+                scrollbar_handle_y = 500
+                drag_distance = 50
+
+            # Calculate drag end position
+            drag_end_y = min(scrollbar_handle_y + drag_distance, 550)
+
+            # Click and drag the handle down
+            await self.page.mouse.move(scrollbar_x, scrollbar_handle_y)
+            await self.page.mouse.down()
+            await asyncio.sleep(0.1)
+            # Drag to end position with more steps for smoother motion
+            await self.page.mouse.move(scrollbar_x, drag_end_y, steps=20)
+            await asyncio.sleep(0.2)
+            await self.page.mouse.up()
+            await asyncio.sleep(1.5)
+
+            # Track that we've scrolled
+            self._scroll_position += 1
+            log.info(f"Scrolled gifts list: drag from Y={scrollbar_handle_y} to Y={drag_end_y} (distance={drag_distance}px)")
+
+        elif method == "keyboard":
+            # Use Page Down key to scroll
+            # First click in the gift list area to focus it
+            target = self._get_coords_or_none("gifts_view", "gift_list_center")
+            if not target:
+                vp = self.config["game"].get("viewport", {"width": 1280, "height": 720})
+                target = {"x": vp["width"] // 2, "y": vp["height"] // 2}
+
+            await self.page.mouse.click(target["x"], target["y"])
+            await asyncio.sleep(0.2)
+            # Press Page Down multiple times
+            for _ in range(3):
+                await self.page.keyboard.press("PageDown")
+                await asyncio.sleep(0.3)
+            await asyncio.sleep(1)
+            log.debug("Scrolled gifts list down using Page Down key.")
+
+        elif method == "click":
+            # Click on the scrollbar track to jump down
+            # User confirmed: scrollbar is at X=1100
+            scrollbar_x = 1100  # Exact X position from user
+
+            # Click multiple times in the lower portion of scrollbar track to jump down
+            # Scrollbar track runs from Y=275 to Y=525
+            click_positions = [400, 450, 500, 520]  # Progressive clicks down the track
+
+            for click_y in click_positions:
+                await self.page.mouse.click(scrollbar_x, click_y)
+                await asyncio.sleep(0.3)
+
+            log.debug(f"Scrolled gifts list down using scrollbar track clicks at X={scrollbar_x}.")
+        else:
+            log.warning(f"Unknown scroll method: {method}")
 
     async def scroll_members_down(self):
         """Scroll the members list down using calibrated list center."""
