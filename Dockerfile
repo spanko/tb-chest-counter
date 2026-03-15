@@ -17,6 +17,7 @@ RUN playwright install chromium --with-deps
 # Copy scanner source
 COPY src/ ./src/
 COPY config/ ./config/
-
+COPY data/calibration.json ./data/calibration.json
+RUN mkdir -p /app/data/screenshots /app/data/browser_data /tmp/screenshots
 # Scanner entrypoint — reads clan config from env vars
 CMD ["python", "src/main.py", "chests", "--cloud"]
