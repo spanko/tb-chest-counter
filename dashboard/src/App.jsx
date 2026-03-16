@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { AdminPanel } from "./AdminSimple";
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const ACCESS_CODE = "FOR2026"; // Change this or move to env var
@@ -180,6 +181,7 @@ function PlayerRow({ rank, player, onSelect, isExpanded, breakdown }) {
 
 // ── Main Dashboard ──────────────────────────────────────────────────────────
 function Dashboard() {
+  const [activeTab, setActiveTab] = useState("leaderboard");
   const [range, setRange] = useState("7d");
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -257,19 +259,47 @@ function Dashboard() {
             <p style={{ color: theme.textMuted, fontSize: 12, margin: 0 }}>FOR Clan Dashboard</p>
           </div>
         </div>
-        <button
-          onClick={fetchLeaderboard}
-          style={{
-            background: "transparent", border: `1px solid ${theme.border}`,
-            color: theme.textMuted, padding: "8px 16px", borderRadius: 6, fontSize: 12,
-            cursor: "pointer", fontFamily: fontBody, transition: "border-color 0.2s, color 0.2s",
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = theme.gold; e.currentTarget.style.color = theme.gold; }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textMuted; }}
-        >↻ Refresh</button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            onClick={() => setActiveTab("leaderboard")}
+            style={{
+              background: activeTab === "leaderboard" ? theme.gold : "transparent",
+              color: activeTab === "leaderboard" ? theme.bg : theme.textMuted,
+              border: `1px solid ${activeTab === "leaderboard" ? theme.gold : theme.border}`,
+              padding: "8px 16px", borderRadius: 6, fontSize: 12,
+              cursor: "pointer", fontFamily: fontBody, fontWeight: 600,
+            }}
+          >Leaderboard</button>
+          <button
+            onClick={() => setActiveTab("admin")}
+            style={{
+              background: activeTab === "admin" ? theme.gold : "transparent",
+              color: activeTab === "admin" ? theme.bg : theme.textMuted,
+              border: `1px solid ${activeTab === "admin" ? theme.gold : theme.border}`,
+              padding: "8px 16px", borderRadius: 6, fontSize: 12,
+              cursor: "pointer", fontFamily: fontBody, fontWeight: 600,
+            }}
+          >Admin</button>
+          {activeTab === "leaderboard" && (
+            <button
+              onClick={fetchLeaderboard}
+              style={{
+                background: "transparent", border: `1px solid ${theme.border}`,
+                color: theme.textMuted, padding: "8px 16px", borderRadius: 6, fontSize: 12,
+                cursor: "pointer", fontFamily: fontBody, transition: "border-color 0.2s, color 0.2s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = theme.gold; e.currentTarget.style.color = theme.gold; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.textMuted; }}
+            >↻ Refresh</button>
+          )}
+        </div>
       </div>
 
-      <div style={{ maxWidth: 800, margin: "0 auto", padding: "24px 16px" }}>
+      <div style={{ maxWidth: activeTab === "admin" ? 1000 : 800, margin: "0 auto", padding: "24px 16px" }}>
+        {activeTab === "admin" ? (
+          <AdminPanel theme={theme} API_BASE={API_BASE} />
+        ) : (
+          <>
         {/* Time Range Tabs */}
         <div style={{ display: "flex", gap: 6, marginBottom: 24, flexWrap: "wrap" }}>
           {TIME_RANGES.map((r) => (
@@ -357,6 +387,8 @@ function Dashboard() {
               </tbody>
             </table>
           </div>
+        )}
+        </>
         )}
       </div>
 
