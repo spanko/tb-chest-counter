@@ -1,0 +1,46 @@
+# ============================================================================
+# .dockerignore — Keep build context lean for fast ACR uploads
+# ============================================================================
+
+# Git
+.git/
+.gitignore
+
+# Infrastructure (not needed in container)
+infra/
+deploy.sh
+build.sh
+*.bicep
+*.bicepparam
+
+# Local data (screenshots, browser state, logs)
+data/screenshots/
+data/browser_data/
+data/*.jsonl
+data/*.csv
+data/*.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docs
+*.md
+LICENSE
+
+# Dashboard (separate deployment)
+dashboard/
+
+# OS
+.DS_Store
+Thumbs.db
