@@ -116,7 +116,14 @@ module.exports = async function (context, req) {
       case "trigger":
         // Record a job trigger request in the database
         // The actual triggering needs to be done via Azure Portal, CLI, or a scheduled job
-        const jobName = req.body?.jobName || "tbdev-scan-for-main";
+        let triggerBody = {};
+        try {
+          // Azure Functions might pass body as string or object
+          triggerBody = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+        } catch (parseErr) {
+          context.log.warn("Failed to parse trigger body:", parseErr);
+        }
+        const jobName = triggerBody.jobName || "tbdev-scan-for-main";
 
         try {
           context.log(`Recording job trigger request: ${jobName}`);
@@ -157,6 +164,14 @@ module.exports = async function (context, req) {
         // Store schedule preferences in database
         const method = req.method?.toUpperCase();
 
+        let scheduleBody = {};
+        try {
+          // Azure Functions might pass body as string or object
+          scheduleBody = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+        } catch (parseErr) {
+          context.log.warn("Failed to parse schedule body:", parseErr);
+        }
+
         if (method === "GET") {
           // Get stored schedule preference
           try {
@@ -194,8 +209,8 @@ module.exports = async function (context, req) {
         } else if (method === "POST") {
           // Store schedule preference
           try {
-            const jobName = req.body?.jobName || "tbdev-scan-for-main";
-            const cronExpression = req.body?.cronExpression || "0 */30 * * * *";
+            const jobName = scheduleBody.jobName || "tbdev-scan-for-main";
+            const cronExpression = scheduleBody.cronExpression || "0 */30 * * * *";
 
             // Store the schedule preference
             const upsertQuery = `

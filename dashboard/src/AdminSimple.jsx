@@ -81,9 +81,15 @@ export function AdminPanel({ theme, API_BASE }) {
         })
       });
 
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        console.error("Failed to parse response:", jsonErr);
+        data = { error: "Invalid server response" };
+      }
 
-      if (res.ok) {
+      if (res.ok && data) {
         if (data.cliCommand) {
           setTriggerMessage(
             <div>
@@ -136,9 +142,15 @@ export function AdminPanel({ theme, API_BASE }) {
         })
       });
 
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        console.error("Failed to parse response:", jsonErr);
+        data = { error: "Invalid server response" };
+      }
 
-      if (res.ok) {
+      if (res.ok && data) {
         if (data.cliCommand) {
           setTriggerMessage(
             <div>
