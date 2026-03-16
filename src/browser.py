@@ -219,18 +219,39 @@ class TBBrowser:
                 clicked = True
                 await asyncio.sleep(3)
 
-                # Wait for the email input to actually appear after clicking
+                # Wait for the email input to actually appear AND be visible after clicking
                 log.info("Waiting for email input field to appear...")
                 try:
+                    # First wait for it to exist in DOM
                     await self.page.wait_for_selector(
                         "input[type='email'], input[placeholder*='mail' i], input[name='email'], input[placeholder='Email']",
-                        timeout=10000
+                        timeout=10000,
+                        state="attached"  # Just needs to be in DOM
                     )
-                    log.info("Email input field detected")
+                    log.info("Email input field found in DOM, waiting for visibility...")
+
+                    # Now wait for it to be visible
+                    await self.page.wait_for_selector(
+                        "input[type='email'], input[placeholder*='mail' i], input[name='email'], input[placeholder='Email']",
+                        timeout=10000,
+                        state="visible"  # Must be visible
+                    )
+                    log.info("Email input field is now visible")
                 except Exception as e:
                     log.warning(f"Timeout waiting for email input: {e}")
                     # Take a debug screenshot to see what's on screen
                     await self._debug_screenshot("login_form_missing")
+
+                    # Try to make it visible by clicking on the form area
+                    log.info("Attempting to click on form area to activate it...")
+                    try:
+                        # Try clicking on the form/modal if it exists
+                        form = self.page.locator("form, .modal, .dialog, .popup").first
+                        if await form.is_visible(timeout=1000):
+                            await form.click()
+                            await asyncio.sleep(1)
+                    except:
+                        pass
         except Exception as e:
             log.warning(f"Failed to click 'Log in': {e}")
 
