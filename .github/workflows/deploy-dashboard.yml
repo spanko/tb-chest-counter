@@ -14,6 +14,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install API dependencies
+        run: |
+          cd dashboard/api
+          npm install
+          cd ../..
+
       - name: Build And Deploy
         id: deploy_swa
         uses: Azure/static-web-apps-deploy@v1
