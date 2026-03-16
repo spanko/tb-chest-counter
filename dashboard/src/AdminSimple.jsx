@@ -9,7 +9,10 @@ export function AdminPanel({ theme, API_BASE }) {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [adminCode, setAdminCode] = useState("");
   const [authorized, setAuthorized] = useState(false);
-  const [message, setMessage] = useState("");
+  const [triggering, setTriggering] = useState(false);
+  const [scheduleMode, setScheduleMode] = useState(false);
+  const [cronExpression, setCronExpression] = useState("0 */30 * * * *");
+  const [triggerMessage, setTriggerMessage] = useState("");
 
   // Check if admin code is correct
   const checkAdminAuth = () => {
@@ -37,7 +40,6 @@ export function AdminPanel({ theme, API_BASE }) {
         const data = await res.json();
         setRuns(data.runs || []);
         setStats(data.stats || {});
-        setMessage(data.message || "");
       }
     } catch (e) {
       console.error("Failed to fetch status:", e);
@@ -60,6 +62,112 @@ export function AdminPanel({ theme, API_BASE }) {
       console.error("Failed to fetch logs:", e);
     }
   }, [authorized, API_BASE]);
+
+  // Trigger job
+  const triggerJob = async () => {
+    setTriggering(true);
+    setTriggerMessage("");
+
+    try {
+      const res = await fetch(`${API_BASE}/admin?action=trigger`, {
+        method: "POST",
+        headers: {
+          "X-Admin-Code": "FOR2026-ADMIN",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          jobName: "tbdev-scan-for-main",
+          resourceGroup: "rg-tb-chest-counter-dev"
+        })
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        if (data.cliCommand) {
+          setTriggerMessage(
+            <div>
+              ✅ {data.message}<br/>
+              <code style={{
+                background: theme.surface,
+                padding: "4px 8px",
+                borderRadius: 4,
+                fontSize: 12,
+                display: "inline-block",
+                marginTop: 8
+              }}>
+                {data.cliCommand}
+              </code>
+            </div>
+          );
+        } else {
+          setTriggerMessage(`✅ ${data.message}`);
+        }
+        // Refresh status after trigger
+        setTimeout(() => {
+          fetchStatus();
+          setTriggerMessage("");
+        }, 5000);
+      } else {
+        setTriggerMessage(`❌ Error: ${data.error}`);
+      }
+    } catch (e) {
+      setTriggerMessage(`❌ Failed to trigger job: ${e.message}`);
+    } finally {
+      setTriggering(false);
+    }
+  };
+
+  // Update schedule
+  const updateSchedule = async () => {
+    setLoading(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/admin?action=schedule`, {
+        method: "POST",
+        headers: {
+          "X-Admin-Code": "FOR2026-ADMIN",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          jobName: "tbdev-scan-for-main",
+          resourceGroup: "rg-tb-chest-counter-dev",
+          cronExpression: cronExpression
+        })
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        if (data.cliCommand) {
+          setTriggerMessage(
+            <div>
+              ✅ {data.message}<br/>
+              <code style={{
+                background: theme.surface,
+                padding: "4px 8px",
+                borderRadius: 4,
+                fontSize: 12,
+                display: "inline-block",
+                marginTop: 8
+              }}>
+                {data.cliCommand}
+              </code>
+            </div>
+          );
+        } else {
+          setTriggerMessage(`✅ Schedule updated: ${data.cronExpression}`);
+        }
+        setScheduleMode(false);
+      } else {
+        setTriggerMessage(`❌ Error: ${data.error}`);
+      }
+    } catch (e) {
+      setTriggerMessage(`❌ Failed to update schedule: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Auto-refresh
   useEffect(() => {
@@ -89,7 +197,7 @@ export function AdminPanel({ theme, API_BASE }) {
           placeholder="Enter admin code"
           value={adminCode}
           onChange={(e) => setAdminCode(e.target.value)}
-          onKeyPress={(e) => e.key === "Enter" && checkAdminAuth()}
+          onKeyDown={(e) => e.key === "Enter" && checkAdminAuth()}
           style={{
             padding: "10px 20px",
             fontSize: 14,
@@ -132,6 +240,23 @@ export function AdminPanel({ theme, API_BASE }) {
 
         <div style={{ display: "flex", gap: 15, alignItems: "center", flexWrap: "wrap" }}>
           <button
+            onClick={triggerJob}
+            disabled={triggering}
+            style={{
+              padding: "8px 20px",
+              background: triggering ? theme.border : theme.gold,
+              color: triggering ? theme.textMuted : theme.bg,
+              border: `1px solid ${theme.gold}`,
+              borderRadius: 6,
+              cursor: triggering ? "not-allowed" : "pointer",
+              fontSize: 14,
+              fontWeight: 600
+            }}
+          >
+            {triggering ? "⏳ Triggering..." : "🚀 Start Scan"}
+          </button>
+
+          <button
             onClick={() => { fetchStatus(); fetchLogs(); }}
             style={{
               padding: "8px 20px",
@@ -146,6 +271,21 @@ export function AdminPanel({ theme, API_BASE }) {
             ↻ Refresh
           </button>
 
+          <button
+            onClick={() => setScheduleMode(!scheduleMode)}
+            style={{
+              padding: "8px 20px",
+              background: "transparent",
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: 14
+            }}
+          >
+            ⏰ Schedule
+          </button>
+
           <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input
               type="checkbox"
@@ -156,23 +296,86 @@ export function AdminPanel({ theme, API_BASE }) {
           </label>
         </div>
 
-        {message && (
+        {triggerMessage && (
           <div style={{
             marginTop: 15,
-            padding: 12,
-            background: theme.bg,
-            border: `1px solid ${theme.border}`,
+            padding: 10,
+            background: (typeof triggerMessage === 'string' && triggerMessage.startsWith("❌")) ? `${theme.red}20` : `${theme.green}20`,
+            border: `1px solid ${(typeof triggerMessage === 'string' && triggerMessage.startsWith("❌")) ? theme.red : theme.green}`,
             borderRadius: 6,
-            color: theme.gold,
+            color: (typeof triggerMessage === 'string' && triggerMessage.startsWith("❌")) ? theme.red : theme.green,
             fontSize: 13
           }}>
-            <strong>ℹ️ How to start a job:</strong><br/>
-            {message}<br/><br/>
-            <code style={{ background: theme.surface, padding: "4px 8px", borderRadius: 4 }}>
-              az containerapp job start --name tbdev-scan-for-main --resource-group rg-tb-chest-counter-dev
-            </code>
+            {triggerMessage}
           </div>
         )}
+
+        {scheduleMode && (
+          <div style={{
+            marginTop: 15,
+            padding: 15,
+            background: theme.bg,
+            border: `1px solid ${theme.border}`,
+            borderRadius: 6
+          }}>
+            <h4 style={{ color: theme.gold, marginBottom: 10, fontSize: 14 }}>Configure Schedule</h4>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <input
+                type="text"
+                value={cronExpression}
+                onChange={(e) => setCronExpression(e.target.value)}
+                placeholder="Cron expression"
+                style={{
+                  padding: "6px 12px",
+                  background: theme.surface,
+                  border: `1px solid ${theme.border}`,
+                  color: theme.text,
+                  borderRadius: 4,
+                  fontSize: 13,
+                  width: 200
+                }}
+              />
+              <button
+                onClick={updateSchedule}
+                disabled={loading}
+                style={{
+                  padding: "6px 16px",
+                  background: theme.gold,
+                  color: theme.bg,
+                  border: "none",
+                  borderRadius: 4,
+                  cursor: loading ? "not-allowed" : "pointer",
+                  fontSize: 13,
+                  fontWeight: 600
+                }}
+              >
+                {loading ? "Updating..." : "Update"}
+              </button>
+              <button
+                onClick={() => setScheduleMode(false)}
+                style={{
+                  padding: "6px 16px",
+                  background: "transparent",
+                  color: theme.textMuted,
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  fontSize: 13
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+            <div style={{ marginTop: 10, color: theme.textMuted, fontSize: 12 }}>
+              <strong>Examples:</strong><br/>
+              • Every 30 mins: <code>0 */30 * * * *</code><br/>
+              • Every hour: <code>0 0 * * * *</code><br/>
+              • Every 6 hours: <code>0 0 */6 * * *</code><br/>
+              • Format: <code>second minute hour day month weekday</code>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* Stats */}

@@ -113,6 +113,128 @@ module.exports = async function (context, req) {
         };
         break;
 
+      case "trigger":
+        // Record a job trigger request in the database
+        // The actual triggering needs to be done via Azure Portal, CLI, or a scheduled job
+        const jobName = req.body?.jobName || "tbdev-scan-for-main";
+
+        try {
+          context.log(`Recording job trigger request: ${jobName}`);
+
+          // Log the trigger request in database
+          const logQuery = `
+            INSERT INTO runs (clan_id, started_at, status, model_used)
+            VALUES ($1, NOW(), 'requested', 'manual')
+            RETURNING run_id
+          `;
+          const result = await pool.query(logQuery, ["FOR"]);
+
+          context.res = {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              success: true,
+              message: `Job trigger request recorded. Use Azure CLI or Portal to start the job.`,
+              runId: result.rows[0].run_id,
+              jobName: jobName,
+              cliCommand: `az containerapp job start --name ${jobName} --resource-group rg-tb-chest-counter-dev`
+            })
+          };
+        } catch (triggerErr) {
+          context.log.error("Job trigger error:", triggerErr);
+          context.res = {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              error: "Failed to record trigger request",
+              detail: triggerErr.message
+            })
+          };
+        }
+        break;
+
+      case "schedule":
+        // Store schedule preferences in database
+        const method = req.method?.toUpperCase();
+
+        if (method === "GET") {
+          // Get stored schedule preference
+          try {
+            const scheduleQuery = `
+              SELECT
+                cron_expression,
+                updated_at
+              FROM job_schedules
+              WHERE job_name = $1
+              ORDER BY updated_at DESC
+              LIMIT 1
+            `;
+
+            const result = await pool.query(scheduleQuery, ["tbdev-scan-for-main"]);
+
+            context.res = {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                cronExpression: result.rows[0]?.cron_expression || "0 */30 * * * *",
+                lastUpdated: result.rows[0]?.updated_at,
+                info: "Schedule is stored as preference. Update via Azure CLI to apply."
+              })
+            };
+          } catch (scheduleErr) {
+            context.res = {
+              status: 500,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                error: "Failed to get schedule",
+                detail: scheduleErr.message
+              })
+            };
+          }
+        } else if (method === "POST") {
+          // Store schedule preference
+          try {
+            const jobName = req.body?.jobName || "tbdev-scan-for-main";
+            const cronExpression = req.body?.cronExpression || "0 */30 * * * *";
+
+            // Store the schedule preference
+            const upsertQuery = `
+              INSERT INTO job_schedules (job_name, cron_expression, updated_at)
+              VALUES ($1, $2, NOW())
+              ON CONFLICT (job_name)
+              DO UPDATE SET cron_expression = $2, updated_at = NOW()
+            `;
+
+            await pool.query(upsertQuery, [jobName, cronExpression]);
+
+            context.res = {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                success: true,
+                message: "Schedule preference saved",
+                cronExpression: cronExpression,
+                cliCommand: `az containerapp job update --name ${jobName} --resource-group rg-tb-chest-counter-dev --cron-expression "${cronExpression}"`
+              })
+            };
+          } catch (updateErr) {
+            context.res = {
+              status: 500,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                error: "Failed to save schedule",
+                detail: updateErr.message
+              })
+            };
+          }
+        } else {
+          context.res = {
+            status: 405,
+            body: JSON.stringify({ error: "Method not allowed" })
+          };
+        }
+        break;
+
       default:
         context.res = {
           status: 400,
