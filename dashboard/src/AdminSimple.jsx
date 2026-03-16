@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 
 // Simplified admin panel that shows job status from database
 export function AdminPanel({ theme, API_BASE }) {
+  // Allow environment variable override for API base URL
+  const apiBase = import.meta.env.VITE_API_BASE || API_BASE;
   const [runs, setRuns] = useState([]);
   const [stats, setStats] = useState(null);
   const [logs, setLogs] = useState([]);
@@ -35,7 +37,7 @@ export function AdminPanel({ theme, API_BASE }) {
     if (!authorized) return;
 
     try {
-      const res = await fetch(`${API_BASE}/admin?action=status`, {
+      const res = await fetch(`${apiBase}/admin?action=status`, {
         headers: { "X-Admin-Code": "FOR2026-ADMIN" }
       });
       if (res.ok) {
@@ -46,14 +48,14 @@ export function AdminPanel({ theme, API_BASE }) {
     } catch (e) {
       console.error("Failed to fetch status:", e);
     }
-  }, [authorized, API_BASE]);
+  }, [authorized, apiBase]);
 
   // Fetch logs
   const fetchLogs = useCallback(async () => {
     if (!authorized) return;
 
     try {
-      const res = await fetch(`${API_BASE}/admin?action=logs`, {
+      const res = await fetch(`${apiBase}/admin?action=logs`, {
         headers: { "X-Admin-Code": "FOR2026-ADMIN" }
       });
       if (res.ok) {
@@ -63,7 +65,7 @@ export function AdminPanel({ theme, API_BASE }) {
     } catch (e) {
       console.error("Failed to fetch logs:", e);
     }
-  }, [authorized, API_BASE]);
+  }, [authorized, apiBase]);
 
   // Trigger job
   const triggerJob = async () => {
@@ -71,7 +73,7 @@ export function AdminPanel({ theme, API_BASE }) {
     setTriggerMessage("");
 
     try {
-      const res = await fetch(`${API_BASE}/admin?action=trigger`, {
+      const res = await fetch(`${apiBase}/admin?action=trigger`, {
         method: "POST",
         headers: {
           "X-Admin-Code": "FOR2026-ADMIN",
@@ -129,7 +131,7 @@ export function AdminPanel({ theme, API_BASE }) {
   // Fetch diagnostics
   const fetchDiagnostics = async () => {
     try {
-      const res = await fetch(`${API_BASE}/admin?action=health`, {
+      const res = await fetch(`${apiBase}/admin?action=health`, {
         headers: { "X-Admin-Code": "FOR2026-ADMIN" }
       });
 
@@ -182,7 +184,7 @@ export function AdminPanel({ theme, API_BASE }) {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE}/admin?action=schedule`, {
+      const res = await fetch(`${apiBase}/admin?action=schedule`, {
         method: "POST",
         headers: {
           "X-Admin-Code": "FOR2026-ADMIN",
