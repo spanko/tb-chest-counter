@@ -13,6 +13,8 @@ export function AdminPanel({ theme, API_BASE }) {
   const [scheduleMode, setScheduleMode] = useState(false);
   const [cronExpression, setCronExpression] = useState("0 */30 * * * *");
   const [triggerMessage, setTriggerMessage] = useState("");
+  const [diagnostics, setDiagnostics] = useState(null);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   // Check if admin code is correct
   const checkAdminAuth = () => {
@@ -121,6 +123,31 @@ export function AdminPanel({ theme, API_BASE }) {
       setTriggerMessage(`❌ Failed to trigger job: ${e.message}`);
     } finally {
       setTriggering(false);
+    }
+  };
+
+  // Fetch diagnostics
+  const fetchDiagnostics = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/admin?action=health`, {
+        headers: { "X-Admin-Code": "FOR2026-ADMIN" }
+      });
+
+      let data;
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        console.error("Failed to parse diagnostics response:", jsonErr);
+        data = { error: "Invalid diagnostics response" };
+      }
+
+      if (res.ok && data) {
+        setDiagnostics(data);
+      } else {
+        setDiagnostics({ error: data.error || "Failed to fetch diagnostics" });
+      }
+    } catch (e) {
+      setDiagnostics({ error: e.message });
     }
   };
 
@@ -298,6 +325,24 @@ export function AdminPanel({ theme, API_BASE }) {
             ⏰ Schedule
           </button>
 
+          <button
+            onClick={() => {
+              setShowDiagnostics(!showDiagnostics);
+              if (!showDiagnostics) fetchDiagnostics();
+            }}
+            style={{
+              padding: "8px 20px",
+              background: "transparent",
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: 14
+            }}
+          >
+            🔧 Diagnostics
+          </button>
+
           <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input
               type="checkbox"
@@ -385,6 +430,94 @@ export function AdminPanel({ theme, API_BASE }) {
               • Every 6 hours: <code>0 0 */6 * * *</code><br/>
               • Format: <code>second minute hour day month weekday</code>
             </div>
+          </div>
+        )}
+
+        {showDiagnostics && diagnostics && (
+          <div style={{
+            marginTop: 15,
+            padding: 15,
+            background: theme.bg,
+            border: `1px solid ${theme.border}`,
+            borderRadius: 6
+          }}>
+            <h4 style={{ color: theme.gold, marginBottom: 10, fontSize: 14 }}>System Diagnostics</h4>
+            {diagnostics.error ? (
+              <div style={{ color: theme.red }}>❌ Error: {diagnostics.error}</div>
+            ) : (
+              <div style={{ fontSize: 13 }}>
+                <div style={{ marginBottom: 10 }}>
+                  <strong style={{ color: theme.text }}>Database Connection:</strong>{" "}
+                  <span style={{ color: diagnostics.connection ? theme.green : theme.red }}>
+                    {diagnostics.connection ? "✅ Connected" : "❌ Disconnected"}
+                  </span>
+                </div>
+
+                <div style={{ marginBottom: 10 }}>
+                  <strong style={{ color: theme.text }}>Status:</strong>{" "}
+                  <span style={{
+                    color: diagnostics.status === "healthy" ? theme.green : theme.red,
+                    textTransform: "capitalize"
+                  }}>
+                    {diagnostics.status}
+                  </span>
+                </div>
+
+                <div style={{ marginBottom: 10 }}>
+                  <strong style={{ color: theme.text }}>Tables:</strong>
+                </div>
+
+                <div style={{
+                  background: theme.surface,
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 4,
+                  padding: 10,
+                  fontFamily: "monospace",
+                  fontSize: 12
+                }}>
+                  {Object.entries(diagnostics.tables || {}).map(([table, info]) => (
+                    <div key={table} style={{ marginBottom: 8 }}>
+                      <strong>{table}:</strong>{" "}
+                      {info.exists !== undefined ? (
+                        info.exists ? (
+                          <span style={{ color: theme.green }}>
+                            ✅ Exists
+                            {info.count !== undefined && ` (${info.count} records)`}
+                            {info.lastRun && (
+                              <span style={{ color: theme.textMuted, marginLeft: 10 }}>
+                                Last: {new Date(info.lastRun).toLocaleString()}
+                              </span>
+                            )}
+                            {info.lastScan && (
+                              <span style={{ color: theme.textMuted, marginLeft: 10 }}>
+                                Last: {new Date(info.lastScan).toLocaleString()}
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          <span style={{ color: theme.red }}>
+                            ❌ Not found: {info.error}
+                          </span>
+                        )
+                      ) : (
+                        <span style={{ color: theme.textMuted }}>Unknown</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {diagnostics.errors && diagnostics.errors.length > 0 && (
+                  <div style={{ marginTop: 10 }}>
+                    <strong style={{ color: theme.red }}>Errors:</strong>
+                    {diagnostics.errors.map((err, i) => (
+                      <div key={i} style={{ color: theme.red, fontSize: 12, marginTop: 5 }}>
+                        • {err}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

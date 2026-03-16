@@ -176,6 +176,104 @@ module.exports = async function (context, req) {
         }
         break;
 
+      case "health":
+        // Health check and diagnostic endpoint
+        try {
+          const diagnostics = {
+            connection: false,
+            tables: {
+              runs: false,
+              job_schedules: false,
+              chests: false
+            },
+            errors: []
+          };
+
+          // Test database connection
+          try {
+            await pool.query("SELECT 1");
+            diagnostics.connection = true;
+          } catch (connErr) {
+            diagnostics.errors.push(`Connection failed: ${connErr.message}`);
+          }
+
+          // Check if tables exist and have data
+          if (diagnostics.connection) {
+            // Check runs table
+            try {
+              const runsCheck = await pool.query(`
+                SELECT COUNT(*) as count,
+                       MAX(started_at) as last_run
+                FROM runs
+                WHERE clan_id = $1
+              `, ["FOR"]);
+              diagnostics.tables.runs = {
+                exists: true,
+                count: parseInt(runsCheck.rows[0].count),
+                lastRun: runsCheck.rows[0].last_run
+              };
+            } catch (err) {
+              diagnostics.tables.runs = { exists: false, error: err.message };
+            }
+
+            // Check job_schedules table
+            try {
+              const schedCheck = await pool.query(`
+                SELECT COUNT(*) as count,
+                       MAX(updated_at) as last_update
+                FROM job_schedules
+              `);
+              diagnostics.tables.job_schedules = {
+                exists: true,
+                count: parseInt(schedCheck.rows[0].count),
+                lastUpdate: schedCheck.rows[0].last_update
+              };
+            } catch (err) {
+              diagnostics.tables.job_schedules = { exists: false, error: err.message };
+            }
+
+            // Check chests table
+            try {
+              const chestsCheck = await pool.query(`
+                SELECT COUNT(*) as count,
+                       COUNT(DISTINCT player_name) as players,
+                       MAX(scanned_at) as last_scan
+                FROM chests
+                WHERE clan_id = $1
+              `, ["FOR"]);
+              diagnostics.tables.chests = {
+                exists: true,
+                count: parseInt(chestsCheck.rows[0].count),
+                players: parseInt(chestsCheck.rows[0].players),
+                lastScan: chestsCheck.rows[0].last_scan
+              };
+            } catch (err) {
+              diagnostics.tables.chests = { exists: false, error: err.message };
+            }
+          }
+
+          // Add timestamp and status
+          diagnostics.timestamp = new Date().toISOString();
+          diagnostics.status = diagnostics.connection ? "healthy" : "unhealthy";
+
+          context.res = {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(diagnostics)
+          };
+        } catch (healthErr) {
+          context.res = {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              error: "Health check failed",
+              detail: healthErr.message,
+              timestamp: new Date().toISOString()
+            })
+          };
+        }
+        break;
+
       case "schedule":
         // Store schedule preferences in database
         const method = req.method?.toUpperCase();
