@@ -31,7 +31,7 @@ class GiftPageExtraction(BaseModel):
     """Result of extracting all gifts from one screenshot."""
     gifts: list[ChestGift] = Field(default_factory=list)
     total_gift_count: Optional[int] = Field(default=None, description="Number shown in the Gifts tab badge, e.g. 23")
-    has_more: bool = Field(default=False, description="True if the list continues below visible area (no 'Claim chests' button visible)")
+    has_more: bool = Field(default=False, description="True if there are more gifts to scan (check if visible gifts < total_gift_count or scrollbar indicates more content)")
     extraction_notes: str = Field(default="", description="Any issues noticed during extraction")
 
 
@@ -50,9 +50,10 @@ GIFT ENTRY LAYOUT (each entry is a row with):
 - A green "Open" button on the far right
 
 PAGE STRUCTURE:
-- Top: "Gifts" tab with a red badge showing total count (e.g., "23")
+- Top: "Gifts" tab with a red badge showing total count (e.g., "493")
 - Middle: List of gift entries (typically 4 visible at once)
-- Bottom: "Delete expired chests" link and "Claim chests" button (only visible on the last page)
+- Bottom: "Delete expired chests" link and "Claim chests" button (these appear on EVERY page, not just the last)
+- Right side: Scrollbar may indicate if more content exists below
 
 EXTRACTION RULES:
 1. Extract EVERY visible gift entry. Do not skip any.
@@ -62,8 +63,12 @@ EXTRACTION RULES:
 4. Extract the source (e.g., "Level 10 Crypt", "Level 15 Citadel").
 5. Extract the time remaining (e.g., "18h 12m").
 6. If the red badge number is visible on the Gifts tab, include it as total_gift_count.
-7. IMPORTANT: Set has_more=true if you CANNOT see "Claim chests" or "Delete expired chests" at the bottom.
-   Set has_more=false ONLY when you can see these buttons (meaning this is the last page).
+7. IMPORTANT: Determine has_more using these rules:
+   - If total_gift_count exists and is higher than the number of gifts visible on screen, set has_more=true
+   - If you can see a scrollbar on the right that indicates more content below, set has_more=true
+   - If the list appears to be cut off at the bottom (partial gift entry visible), set has_more=true
+   - Only set has_more=false when you're certain all gifts have been shown (e.g., visible count matches total_gift_count)
+   - NOTE: The "Claim chests" button appears on EVERY page, so don't use it to determine if there are more pages
 8. If text is partially obscured or unclear, lower the confidence score.
 
 CONFIDENCE SCORING:
@@ -91,14 +96,15 @@ Return a JSON object with this EXACT structure:
     }
   ],
   "total_gift_count": null or number from badge,
-  "has_more": true if there are more gifts below (no "Claim chests" button visible),
+  "has_more": true if there are more gifts to scan (visible gifts < total_gift_count),
   "extraction_notes": ""
 }
 
 IMPORTANT:
 - Use field name "player_name" NOT "from_player" or other variations.
-- Set has_more=true when the list continues below and you CANNOT see the "Claim chests" button.
-- Set has_more=false ONLY when you can see the "Claim chests" or "Delete expired chests" buttons."""
+- Set has_more=true when there are more gifts to scan (e.g., if total_gift_count is 493 but only 4 gifts are visible)
+- Set has_more=false ONLY when all gifts have been displayed (visible count matches or exceeds total_gift_count)
+- The "Claim chests" button appears on EVERY page, so DO NOT use it to determine if there are more pages"""
 
 # ── Extraction Functions ────────────────────────────────────────────────────
 

@@ -34,6 +34,111 @@ def setup_logging(verbose: bool = False):
     )
 
 
+# ── Chest Opener ────────────────────────────────────────────────────────────
+
+async def run_chest_open(config: dict):
+    """Open all available chest gifts by clicking Open on each one, storing gift data first."""
+    from browser import TBBrowser
+    from vision import extract_gifts_from_screenshot
+
+    cloud_mode = config.get("_cloud_mode", False)
+    clan_id = config.get("_clan_id", "local")
+    headless = config.get("_headless", True)
+    vision_cfg = config.get("vision", {})
+
+    # Select storage backend
+    if cloud_mode:
+        from storage_pg import Storage
+    else:
+        from storage import Storage
+
+    storage = Storage(config)
+    run_id = storage.start_run(f"open:{vision_cfg.get('model_routine', 'claude-haiku-4-5-20251001')}")
+
+    roster = storage.get_roster()
+    total_opened = 0
+    total_stored = 0
+    consecutive_fails = 0
+    recalibrate_interval = 25  # Recalibrate after every 25 gifts
+
+    try:
+        async with TBBrowser(config, headless=headless) as browser:
+            await browser.login()
+            await browser.navigate_to_gifts()
+
+            log.info("Starting to open gifts (with data extraction)...")
+
+            # Keep clicking Open buttons until none are found
+            max_gifts = 500  # Safety limit
+
+            while total_opened < max_gifts:
+                # Recalibrate periodically to maintain accuracy
+                if total_opened > 0 and total_opened % recalibrate_interval == 0:
+                    log.info(f"Recalibrating after {total_opened} gifts...")
+                    await browser.recalibrate_open_button()
+
+                # Take screenshot to extract gift data before opening
+                screenshots = await browser.capture_gift_screenshots(count=1)
+
+                if screenshots:
+                    # Extract gift information from the screenshot
+                    result = extract_gifts_from_screenshot(screenshots[0], config)
+
+                    if result.gifts and len(result.gifts) > 0:
+                        # Store the first gift's data (the one we're about to open)
+                        top_gift = result.gifts[0]
+                        gift_dict = top_gift.model_dump() if hasattr(top_gift, 'model_dump') else top_gift.dict()
+
+                        # Fuzzy match player name against roster
+                        if roster:
+                            gift_dict["player_name_raw"] = gift_dict["player_name"]
+                            matched = _fuzzy_match(gift_dict["player_name"], roster)
+                            if matched:
+                                gift_dict["player_name"] = matched
+
+                        gift_dict["screenshot_ref"] = str(screenshots[0])
+
+                        # Store the gift data
+                        is_new = storage.store_chest(run_id, gift_dict)
+                        if is_new:
+                            total_stored += 1
+                            log.info(f"Stored: {top_gift.player_name} / {top_gift.chest_type}")
+
+                # Now click the Open button on the first gift
+                clicked = await browser.click_open_first_gift()
+
+                if clicked:
+                    total_opened += 1
+                    consecutive_fails = 0
+                    log.info(f"Opened gift #{total_opened}")
+
+                    # Brief pause for the reward popup
+                    await browser.dismiss_reward_popup()
+                else:
+                    consecutive_fails += 1
+                    if consecutive_fails >= 3:
+                        log.info("No more gifts to open (3 consecutive fails)")
+                        break
+
+                    # Try scrolling to see if there are more gifts
+                    log.info("No Open button found, trying to scroll...")
+                    await browser.scroll_gifts_down()
+                    await asyncio.sleep(1)  # Wait for scroll to settle
+
+        storage.complete_run(run_id, 1, total_opened, total_stored, 0.0)
+        log.info(
+            f"Gift opening complete: {total_opened} gifts opened, "
+            f"{total_stored} new records stored (clan: {clan_id})"
+        )
+
+    except Exception as e:
+        log.error(f"Gift opening failed: {e}", exc_info=True)
+        storage.fail_run(run_id, str(e))
+        raise
+    finally:
+        storage.close()
+
+
 # ── Chest Scanner ───────────────────────────────────────────────────────────
 
 async def run_chest_scan(config: dict):
@@ -302,6 +407,8 @@ def main():
                         help="Cloud mode — read config from env vars")
     parser.add_argument("--visible", action="store_true",
                         help="Show browser window (local dev)")
+    parser.add_argument("--open", action="store_true",
+                        help="Open mode — click Open on each gift instead of just scanning")
     parser.add_argument("--verbose", "-v", action="store_true")
 
     args = parser.parse_args()
@@ -315,8 +422,14 @@ def main():
     # Set headless based on --visible flag
     config["_headless"] = not args.visible
 
+    # Set open mode if specified
+    config["_open_mode"] = args.open if hasattr(args, 'open') else False
+
     if scan_mode == "chests":
-        asyncio.run(run_chest_scan(config))
+        if config["_open_mode"]:
+            asyncio.run(run_chest_open(config))
+        else:
+            asyncio.run(run_chest_scan(config))
 
     elif scan_mode == "smoke":
         asyncio.run(run_smoke_test(config))

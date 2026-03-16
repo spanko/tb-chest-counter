@@ -473,3 +473,74 @@ class Storage:
                 ORDER BY is_active DESC, player_name
             """).fetchall()
             return [dict(r) for r in rows]
+
+    # ── Cloud-compatible interface ──────────────────────────────────────────
+    # These methods match storage_pg.py so main.py works in both local and
+    # cloud mode without branching.
+
+    def start_run(self, vision_model: str) -> int:
+        """Start a scan run and return its ID."""
+        scan_time = datetime.now(timezone.utc).isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "INSERT INTO scan_log (scan_time, model_used) VALUES (?, ?)",
+                (scan_time, vision_model),
+            )
+            return cursor.lastrowid
+
+    def complete_run(self, run_id: int, pages: int, found: int, new: int,
+                     cost: float = 0.0):
+        """Mark a scan run as complete."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE scan_log SET pages_scanned = ?, gifts_found = ?, gifts_new = ? WHERE id = ?",
+                (pages, found, new, run_id),
+            )
+
+    def fail_run(self, run_id: int, error: str):
+        """Mark a scan run as failed."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE scan_log SET gifts_found = -1 WHERE id = ?",
+                (run_id,),
+            )
+
+    def store_chest(self, run_id: int, gift: dict) -> bool:
+        """Store a single gift dict with deduplication.
+
+        Returns True if the gift was new, False if duplicate.
+        """
+        raw_type = gift.get("chest_type", "unknown")
+        canonical, points = normalize_chest_type(raw_type, self.chest_values)
+        player = gift.get("player_name", "unknown")
+
+        with sqlite3.connect(self.db_path) as conn:
+            if self._is_duplicate(conn, player, canonical):
+                log.debug(f"Skipping duplicate: {player} / {canonical}")
+                return False
+
+            scan_time = datetime.now(timezone.utc).isoformat()
+            conn.execute("""
+                INSERT INTO gifts (player_name, chest_type, chest_type_raw,
+                                   source, points, quantity, confidence, time_left, scan_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                player,
+                canonical,
+                raw_type,
+                gift.get("source"),
+                points * gift.get("quantity", 1),
+                gift.get("quantity", 1),
+                gift.get("confidence", 1.0),
+                gift.get("time_left"),
+                scan_time,
+            ))
+            return True
+
+    def get_roster(self) -> list[str]:
+        """Alias for get_active_roster — matches storage_pg interface."""
+        return self.get_active_roster()
+
+    def close(self):
+        """No-op for SQLite (connections are opened/closed per call)."""
+        pass
