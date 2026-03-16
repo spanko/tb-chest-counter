@@ -1,0 +1,12 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "AzureWebJobsStorage": "",
+    "PG_HOST": "tbdev-pg-b7jbhj.postgres.database.azure.com",
+    "PG_DATABASE": "tbchests",
+    "PG_USER": "tbadmin",
+    "PG_PASSWORD": "",
+    "PG_SSLMODE": "require"
+  }
+}

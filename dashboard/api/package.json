@@ -1,0 +1,8 @@
+{
+  "name": "tb-chest-dashboard-api",
+  "version": "1.0.0",
+  "description": "Azure Functions API for TB Chest Counter dashboard",
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}
