@@ -80,50 +80,65 @@ async def run_chest_open(config: dict):
                 # Take screenshot to extract gift data before opening
                 screenshots = await browser.capture_gift_screenshots(count=1)
 
-                if screenshots:
-                    # Extract gift information from the screenshot
-                    result = extract_gifts_from_screenshot(screenshots[0], config)
+                if not screenshots:
+                    log.info("No screenshots captured - ending gift opening")
+                    break
 
-                    if result.gifts and len(result.gifts) > 0:
-                        # Store the first gift's data (the one we're about to open)
-                        top_gift = result.gifts[0]
-                        gift_dict = top_gift.model_dump() if hasattr(top_gift, 'model_dump') else top_gift.dict()
+                # Extract gift information from the screenshot
+                result = extract_gifts_from_screenshot(screenshots[0], config)
 
-                        # Fuzzy match player name against roster
-                        if roster:
-                            gift_dict["player_name_raw"] = gift_dict["player_name"]
-                            matched = _fuzzy_match(gift_dict["player_name"], roster)
-                            if matched:
-                                gift_dict["player_name"] = matched
+                # Check if there are any gifts to open
+                if not result.gifts or len(result.gifts) == 0:
+                    # No gifts found, check if we should scroll or stop
+                    consecutive_fails += 1
+                    if consecutive_fails >= 3:
+                        log.info("No gifts found after 3 attempts - all gifts opened")
+                        break
 
-                        gift_dict["screenshot_ref"] = str(screenshots[0])
+                    # Try scrolling to see if there are more gifts
+                    log.info("No gifts found on current page, trying to scroll...")
+                    await browser.scroll_gifts_down()
+                    await asyncio.sleep(1)  # Wait for scroll to settle
+                    continue  # Try again after scrolling
 
-                        # Store the gift data
-                        is_new = storage.store_chest(run_id, gift_dict)
-                        if is_new:
-                            total_stored += 1
-                            log.info(f"Stored: {top_gift.player_name} / {top_gift.chest_type}")
+                # Reset fail counter since we found gifts
+                consecutive_fails = 0
+
+                # Store the first gift's data (the one we're about to open)
+                top_gift = result.gifts[0]
+                gift_dict = top_gift.model_dump() if hasattr(top_gift, 'model_dump') else top_gift.dict()
+
+                # Fuzzy match player name against roster
+                if roster:
+                    gift_dict["player_name_raw"] = gift_dict["player_name"]
+                    matched = _fuzzy_match(gift_dict["player_name"], roster)
+                    if matched:
+                        gift_dict["player_name"] = matched
+
+                gift_dict["screenshot_ref"] = str(screenshots[0])
+
+                # Store the gift data
+                is_new = storage.store_chest(run_id, gift_dict)
+                if is_new:
+                    total_stored += 1
+                    log.info(f"Stored: {top_gift.player_name} / {top_gift.chest_type}")
 
                 # Now click the Open button on the first gift
                 clicked = await browser.click_open_first_gift()
 
                 if clicked:
                     total_opened += 1
-                    consecutive_fails = 0
                     log.info(f"Opened gift #{total_opened}")
 
                     # Brief pause for the reward popup
                     await browser.dismiss_reward_popup()
                 else:
+                    # Failed to click even though we found a gift
+                    log.warning("Found gift but failed to click Open button - may need recalibration")
                     consecutive_fails += 1
                     if consecutive_fails >= 3:
-                        log.info("No more gifts to open (3 consecutive fails)")
+                        log.info("Failed to click Open button 3 times - stopping")
                         break
-
-                    # Try scrolling to see if there are more gifts
-                    log.info("No Open button found, trying to scroll...")
-                    await browser.scroll_gifts_down()
-                    await asyncio.sleep(1)  # Wait for scroll to settle
 
         storage.complete_run(run_id, 1, total_opened, total_stored, 0.0)
         log.info(
