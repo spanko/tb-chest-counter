@@ -2,17 +2,38 @@ const { getPool } = require("../shared/db");
 
 // Simple admin endpoint that provides job status from database
 module.exports = async function (context, req) {
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    context.res = {
+      status: 200,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, X-Admin-Code"
+      },
+      body: ""
+    };
+    return;
+  }
+
   // Check admin authorization
   const adminCode = req.headers["x-admin-code"];
   if (adminCode !== "FOR2026-ADMIN") {
     context.res = {
       status: 403,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      },
       body: JSON.stringify({ error: "Unauthorized" })
     };
     return;
   }
 
   const action = req.query.action || "status";
+
+  // Log the request for debugging
+  context.log(`Admin API - Action: ${action}, Method: ${req.method}`);
 
   try {
     const pool = getPool();
@@ -60,7 +81,10 @@ module.exports = async function (context, req) {
 
         context.res = {
           status: 200,
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          },
           body: JSON.stringify({
             runs: runs.rows.map(r => ({
               id: r.run_id,
@@ -102,7 +126,10 @@ module.exports = async function (context, req) {
 
         context.res = {
           status: 200,
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          },
           body: JSON.stringify({
             logs: logs.rows.map(l => ({
               timestamp: l.timestamp,
@@ -313,7 +340,10 @@ module.exports = async function (context, req) {
           } catch (scheduleErr) {
             context.res = {
               status: 500,
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"
+              },
               body: JSON.stringify({
                 error: "Failed to get schedule",
                 detail: scheduleErr.message
@@ -358,7 +388,10 @@ module.exports = async function (context, req) {
           } catch (updateErr) {
             context.res = {
               status: 500,
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"
+              },
               body: JSON.stringify({
                 error: "Failed to save schedule",
                 detail: updateErr.message
@@ -383,7 +416,10 @@ module.exports = async function (context, req) {
     context.log.error("Admin API error:", err.message);
     context.res = {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      },
       body: JSON.stringify({ error: "Database query failed", detail: err.message })
     };
   }

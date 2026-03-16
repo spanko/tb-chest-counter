@@ -133,21 +133,47 @@ export function AdminPanel({ theme, API_BASE }) {
         headers: { "X-Admin-Code": "FOR2026-ADMIN" }
       });
 
-      let data;
-      try {
-        data = await res.json();
-      } catch (jsonErr) {
-        console.error("Failed to parse diagnostics response:", jsonErr);
-        data = { error: "Invalid diagnostics response" };
+      // First check if response is ok
+      if (!res.ok) {
+        console.error("Diagnostics request failed:", res.status, res.statusText);
+        setDiagnostics({
+          error: `HTTP ${res.status}: ${res.statusText}`,
+          details: "Server returned an error response"
+        });
+        return;
       }
 
-      if (res.ok && data) {
+      // Try to get response text first
+      const text = await res.text();
+
+      // Try to parse as JSON
+      let data;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch (jsonErr) {
+        console.error("Failed to parse diagnostics response:", jsonErr);
+        console.error("Response text was:", text);
+        setDiagnostics({
+          error: "Invalid diagnostics response",
+          details: text ? `Response: ${text.substring(0, 200)}` : "Empty response"
+        });
+        return;
+      }
+
+      if (data) {
         setDiagnostics(data);
       } else {
-        setDiagnostics({ error: data.error || "Failed to fetch diagnostics" });
+        setDiagnostics({
+          error: "No data received",
+          details: "Server returned empty response"
+        });
       }
     } catch (e) {
-      setDiagnostics({ error: e.message });
+      console.error("Diagnostics fetch error:", e);
+      setDiagnostics({
+        error: e.message,
+        details: "Network or connection error"
+      });
     }
   };
 
@@ -443,7 +469,21 @@ export function AdminPanel({ theme, API_BASE }) {
           }}>
             <h4 style={{ color: theme.gold, marginBottom: 10, fontSize: 14 }}>System Diagnostics</h4>
             {diagnostics.error ? (
-              <div style={{ color: theme.red }}>❌ Error: {diagnostics.error}</div>
+              <div>
+                <div style={{ color: theme.red, marginBottom: 10 }}>❌ Error: {diagnostics.error}</div>
+                {diagnostics.details && (
+                  <div style={{
+                    color: theme.textMuted,
+                    fontSize: 12,
+                    background: theme.surface,
+                    padding: 10,
+                    borderRadius: 4,
+                    fontFamily: "monospace"
+                  }}>
+                    {diagnostics.details}
+                  </div>
+                )}
+              </div>
             ) : (
               <div style={{ fontSize: 13 }}>
                 <div style={{ marginBottom: 10 }}>
