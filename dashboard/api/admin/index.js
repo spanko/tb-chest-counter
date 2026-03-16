@@ -128,6 +128,22 @@ module.exports = async function (context, req) {
         try {
           context.log(`Recording job trigger request: ${jobName}`);
 
+          // First try to create the table if it doesn't exist
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS runs (
+              run_id SERIAL PRIMARY KEY,
+              clan_id VARCHAR(50) NOT NULL,
+              started_at TIMESTAMP DEFAULT NOW(),
+              completed_at TIMESTAMP,
+              status VARCHAR(50) DEFAULT 'requested',
+              pages_scanned INTEGER DEFAULT 0,
+              gifts_found INTEGER DEFAULT 0,
+              new_gifts INTEGER DEFAULT 0,
+              error_message TEXT,
+              model_used VARCHAR(100)
+            )
+          `);
+
           // Log the trigger request in database
           const logQuery = `
             INSERT INTO runs (clan_id, started_at, status, model_used)
@@ -211,6 +227,15 @@ module.exports = async function (context, req) {
           try {
             const jobName = scheduleBody.jobName || "tbdev-scan-for-main";
             const cronExpression = scheduleBody.cronExpression || "0 */30 * * * *";
+
+            // First create the table if it doesn't exist
+            await pool.query(`
+              CREATE TABLE IF NOT EXISTS job_schedules (
+                job_name VARCHAR(100) PRIMARY KEY,
+                cron_expression VARCHAR(100) NOT NULL,
+                updated_at TIMESTAMP DEFAULT NOW()
+              )
+            `);
 
             // Store the schedule preference
             const upsertQuery = `
