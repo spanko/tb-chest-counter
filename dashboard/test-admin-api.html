@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin API Test</title>
+</head>
+<body>
+    <h1>Admin API Test</h1>
+    <button onclick="testHealth()">Test Health Endpoint</button>
+    <button onclick="testStatus()">Test Status Endpoint</button>
+    <button onclick="testTrigger()">Test Trigger Endpoint</button>
+
+    <pre id="output"></pre>
+
+    <script>
+        const API_BASE = 'https://tb-chest-for.azurestaticapps.net/api';
+        const ADMIN_CODE = 'FOR2026-ADMIN';
+
+        function log(msg) {
+            document.getElementById('output').innerText += msg + '\n';
+        }
+
+        async function testHealth() {
+            log('\n=== Testing Health Endpoint ===');
+            try {
+                const res = await fetch(`${API_BASE}/admin?action=health`, {
+                    headers: { 'X-Admin-Code': ADMIN_CODE }
+                });
+
+                log(`Status: ${res.status} ${res.statusText}`);
+                log(`Headers: ${JSON.stringify(Object.fromEntries(res.headers.entries()))}`);
+
+                const text = await res.text();
+                log(`Response body: ${text}`);
+
+                try {
+                    const data = JSON.parse(text);
+                    log(`Parsed data: ${JSON.stringify(data, null, 2)}`);
+                } catch (e) {
+                    log(`Failed to parse JSON: ${e.message}`);
+                }
+            } catch (e) {
+                log(`Error: ${e.message}`);
+            }
+        }
+
+        async function testStatus() {
+            log('\n=== Testing Status Endpoint ===');
+            try {
+                const res = await fetch(`${API_BASE}/admin?action=status`, {
+                    headers: { 'X-Admin-Code': ADMIN_CODE }
+                });
+
+                log(`Status: ${res.status} ${res.statusText}`);
+
+                const text = await res.text();
+                log(`Response: ${text.substring(0, 500)}`);
+            } catch (e) {
+                log(`Error: ${e.message}`);
+            }
+        }
+
+        async function testTrigger() {
+            log('\n=== Testing Trigger Endpoint ===');
+            try {
+                const res = await fetch(`${API_BASE}/admin?action=trigger`, {
+                    method: 'POST',
+                    headers: {
+                        'X-Admin-Code': ADMIN_CODE,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        jobName: 'tbdev-scan-for-main',
+                        resourceGroup: 'rg-tb-chest-counter-dev'
+                    })
+                });
+
+                log(`Status: ${res.status} ${res.statusText}`);
+
+                const text = await res.text();
+                log(`Response: ${text.substring(0, 500)}`);
+            } catch (e) {
+                log(`Error: ${e.message}`);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -285,13 +285,19 @@ module.exports = async function (context, req) {
 
           context.res = {
             status: 200,
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*"
+            },
             body: JSON.stringify(diagnostics)
           };
         } catch (healthErr) {
           context.res = {
             status: 500,
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*"
+            },
             body: JSON.stringify({
               error: "Health check failed",
               detail: healthErr.message,
