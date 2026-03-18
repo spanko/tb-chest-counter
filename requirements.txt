@@ -13,6 +13,9 @@ thefuzz[speedup]>=0.22.0
 # PostgreSQL (cloud mode)
 psycopg2-binary>=2.9.9
 
+# Azure Storage (cloud mode screenshots)
+azure-storage-blob>=12.19.0
+
 # Database and export (local mode)
 # sqlite3 is built-in
 

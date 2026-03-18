@@ -188,6 +188,10 @@ async def run_chest_scan(config: dict):
 
             roster = storage.get_roster()
 
+            # Prepare for screenshot uploads if in cloud mode
+            blob_conn = os.environ.get("AZURE_STORAGE_CONNECTION_STRING") if cloud_mode else None
+            uploaded_screenshots = []
+
             page = 0
             max_pages = scan_cfg.get("max_pages", 10)
             multi_frame = scan_cfg.get("multi_frame_count", 2)
@@ -200,6 +204,23 @@ async def run_chest_scan(config: dict):
                     break
 
                 primary_screenshot = screenshots[0]
+
+                # Upload screenshot to blob storage if configured
+                if blob_conn and cloud_mode:
+                    try:
+                        screenshot_url = _upload_scanner_screenshot(
+                            primary_screenshot,
+                            clan_id,
+                            run_id,
+                            page + 1,
+                            blob_conn
+                        )
+                        if screenshot_url:
+                            uploaded_screenshots.append(screenshot_url)
+                            log.info(f"Uploaded screenshot to: {screenshot_url}")
+                    except Exception as e:
+                        log.warning(f"Screenshot upload failed (non-fatal): {e}")
+
                 result = extract_gifts_from_screenshot(primary_screenshot, config)
 
                 if not result.gifts:
@@ -255,6 +276,12 @@ async def run_chest_scan(config: dict):
             f"Scan complete: {total_pages} pages, {total_found} gifts found, "
             f"{total_new} new (clan: {clan_id})"
         )
+
+        # Log uploaded screenshots for debugging
+        if uploaded_screenshots:
+            log.info(f"Screenshots uploaded for debugging: {len(uploaded_screenshots)} files")
+            for url in uploaded_screenshots[:3]:  # Show first 3 URLs
+                log.info(f"  Screenshot: {url}")
 
     except Exception as e:
         log.error(f"Scan failed: {e}", exc_info=True)
@@ -410,6 +437,41 @@ def _upload_smoke_screenshots(screenshot_dir: Path, timestamp: str, conn_string:
         log.warning("[smoke] azure-storage-blob not installed — skipping upload")
     except Exception as e:
         log.warning(f"[smoke] Blob upload failed (non-fatal): {e}")
+
+
+def _upload_scanner_screenshot(screenshot_path: Path, clan_id: str, run_id: int,
+                               page_num: int, conn_string: str) -> str:
+    """Upload scanner screenshot to Azure Blob Storage and return URL."""
+    try:
+        from azure.storage.blob import BlobServiceClient
+
+        client = BlobServiceClient.from_connection_string(conn_string)
+        container_name = "scanner-screenshots"
+        container = client.get_container_client(container_name)
+
+        # Ensure container exists
+        try:
+            container.create_container(public_access="blob")
+        except:
+            pass  # Container already exists
+
+        # Create blob name with run context
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        blob_name = f"{clan_id}/run_{run_id}/page_{page_num:02d}_{timestamp}.png"
+
+        # Upload the screenshot
+        with open(screenshot_path, "rb") as data:
+            container.upload_blob(blob_name, data, overwrite=True)
+
+        # Return the public URL
+        return f"https://{client.account_name}.blob.core.windows.net/{container_name}/{blob_name}"
+
+    except ImportError:
+        log.warning("[scanner] azure-storage-blob not installed — skipping upload")
+        return None
+    except Exception as e:
+        log.warning(f"[scanner] Screenshot upload failed: {e}")
+        return None
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────────
