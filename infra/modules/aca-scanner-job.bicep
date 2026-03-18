@@ -49,10 +49,6 @@ param postgresDatabase string
 @description('PostgreSQL admin user')
 param postgresUser string
 
-@description('Azure Storage connection string for screenshots')
-@secure()
-param storageConnectionString string = ''
-
 // ---------------------------------------------------------------------------
 // Managed Identity — used for ACR pull + Key Vault secret access
 // ---------------------------------------------------------------------------
@@ -146,6 +142,11 @@ resource scannerJob 'Microsoft.App/jobs@2024-03-01' = {
           keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/pg-password'
           identity: identity.id
         }
+        {
+          name: 'azure-storage-connection-string'
+          keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/azure-storage-connection-string'
+          identity: identity.id
+        }
       ]
     }
     template: {
@@ -172,7 +173,7 @@ resource scannerJob 'Microsoft.App/jobs@2024-03-01' = {
             { name: 'VISION_MODEL_ROUTINE', value: 'claude-haiku-4-5-20251001' }
             { name: 'VISION_MODEL_VERIFY', value: 'claude-sonnet-4-5-20250929' }
             { name: 'VISION_VERIFY_THRESHOLD', value: '0.85' }
-            { name: 'AZURE_STORAGE_CONNECTION_STRING', value: storageConnectionString }
+            { name: 'AZURE_STORAGE_CONNECTION_STRING', secretRef: 'azure-storage-connection-string' }
           ]
         }
       ]
