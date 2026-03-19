@@ -181,6 +181,11 @@ async def run_chest_scan(config: dict):
     total_cost = 0.0
     headless = config.get("_headless", True)
 
+    # Add blob connection and run_id to config for debug screenshot uploads
+    if cloud_mode:
+        config["_blob_conn"] = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+        config["_run_id"] = run_id
+
     try:
         async with TBBrowser(config, headless=headless) as browser:
             await browser.login()

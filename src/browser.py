@@ -708,6 +708,38 @@ class TBBrowser:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         fpath = ss_dir / f"debug_{name}_{ts}.png"
         await self.page.screenshot(path=str(fpath), full_page=False)
+
+        # Upload to Azure Blob Storage if in cloud mode
+        if self.config.get("_cloud_mode") and self.config.get("_blob_conn"):
+            try:
+                import os
+                from azure.storage.blob import BlobServiceClient
+
+                client = BlobServiceClient.from_connection_string(self.config["_blob_conn"])
+                container_name = "scanner-screenshots"
+                container = client.get_container_client(container_name)
+
+                # Ensure container exists
+                try:
+                    container.create_container(public_access="blob")
+                except:
+                    pass  # Container already exists
+
+                # Create blob name with debug context
+                clan_id = self.config.get("_clan_id", "unknown")
+                run_id = self.config.get("_run_id", 0)
+                blob_name = f"{clan_id}/run_{run_id}/debug/{name}_{ts}.png"
+
+                # Upload the screenshot
+                with open(fpath, "rb") as data:
+                    container.upload_blob(blob_name, data, overwrite=True)
+
+                url = f"https://{client.account_name}.blob.core.windows.net/{container_name}/{blob_name}"
+                log.info(f"Debug screenshot uploaded: {url}")
+                return str(fpath)
+            except Exception as e:
+                log.warning(f"Debug screenshot upload failed: {e}")
+
         return str(fpath)
 
     async def capture_gift_screenshots(self, count: int = 2) -> list[str]:
