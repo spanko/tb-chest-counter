@@ -13,6 +13,9 @@ WORKDIR /app
 COPY src/ ./src/
 COPY config/ ./config/
 
+# Copy calibration profile (static config, pre-calibrated at 1280x720)
+COPY data/calibration.json ./data/calibration.json
+
 # Create runtime directories (not copied from repo)
 RUN mkdir -p /tmp/screenshots /app/data/browser_data
 
