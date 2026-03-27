@@ -1,16 +1,11 @@
 # ============================================================================
 # TB Chest Scanner — SCANNER IMAGE
 # Thin layer on pre-built base. Code changes rebuild in ~5 seconds.
-#
-# Build in ACR:
-#   az acr build --registry tbdevacrb7jbhj --image tb-chest-scanner:candidate \
-#     --file Dockerfile.scanner .
 # ============================================================================
 
 ARG ACR_SERVER=tbdevacrb7jbhj.azurecr.io
-ARG BASE_TAG=v1
 
-FROM ${ACR_SERVER}/tb-scanner-base:${BASE_TAG}
+FROM ${ACR_SERVER}/tb-scanner-base:v1
 
 WORKDIR /app
 
@@ -18,11 +13,8 @@ WORKDIR /app
 COPY src/ ./src/
 COPY config/ ./config/
 
-# Copy calibration profile (pre-calibrated at 1280x720)
-COPY data/calibration.json ./data/calibration.json
-
-# Copy browser data with pre-baked session cookies
-COPY data/browser_data/ ./data/browser_data/
+# Create runtime directories (not copied from repo)
+RUN mkdir -p /tmp/screenshots /app/data/browser_data
 
 # Scanner entrypoint
-CMD ["python", "src/main.py", "smoke", "--cloud"]
+CMD ["python", "src/main.py", "chests", "--cloud"]

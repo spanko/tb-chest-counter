@@ -13,12 +13,8 @@ build.sh
 *.bicep
 *.bicepparam
 
-# Local data (screenshots, browser state, logs)
-data/screenshots/
-data/browser_data/
-data/*.jsonl
-data/*.csv
-data/*.db
+# Local data (runtime directories, not repo files)
+data/
 
 # Python
 __pycache__/
