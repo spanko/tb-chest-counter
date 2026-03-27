@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
-"""TB Chest Counter — Scanner entrypoint.
+"""TB Chest Counter — Scanner entrypoint (simplified rewrite).
 
-Local:
-    python main.py chests [--visible]       # Run chest counter once
-    python main.py smoke  [--visible]       # Smoke test (no writes to chests table)
-    python main.py export                   # Export chest data to CSV
+The new scan loop is vision-native and stateless per iteration:
+1. Navigate to Gifts tab
+2. Screenshot → ask Claude: "where is the first Open button?" → get (x, y)
+3. Loop: click (x, y) → screenshot → ask Claude: "what did this chest contain?"
+4. Bulk insert to PostgreSQL
+5. Exit
 
-Cloud (ACA Job):
-    python main.py chests --cloud           # Reads config from env vars
-    python main.py smoke  --cloud           # Smoke test in cloud (CI/CD)
+Memory profile: each iteration allocates png_bytes + b64_string, both explicitly
+del'd before the next click. Flat memory regardless of gift count.
+
+Usage:
+    python main.py chests [--visible]       # Run chest opener
+    python main.py chests --cloud           # Cloud mode (reads config from env vars)
 """
 
 import argparse
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -24,6 +30,10 @@ from config import load_config
 
 log = logging.getLogger("tb-scanner")
 
+# Fixed x coordinate — all Open buttons are in the same column
+# Calibrated at 1280x720. Adjust if viewport changes.
+OPEN_BUTTON_X = 995
+
 
 def setup_logging(verbose: bool = False):
     level = logging.DEBUG if verbose else logging.INFO
@@ -34,137 +44,16 @@ def setup_logging(verbose: bool = False):
     )
 
 
-# ── Chest Opener ────────────────────────────────────────────────────────────
+# ── Chest Scanner (New Simplified Loop) ────────────────────────────────────
 
-async def run_chest_open(config: dict):
-    """Open all available chest gifts by clicking Open on each one, storing gift data first."""
-    from browser import TBBrowser
-    from vision import extract_gifts_from_screenshot
-
-    cloud_mode = config.get("_cloud_mode", False)
-    clan_id = config.get("_clan_id", "local")
-    headless = config.get("_headless", True)
-    vision_cfg = config.get("vision", {})
-
-    # Select storage backend
-    if cloud_mode:
-        from storage_pg import Storage
-    else:
-        from storage import Storage
-
-    storage = Storage(config)
-    run_id = storage.start_run(f"open:{vision_cfg.get('model_routine', 'claude-haiku-4-5-20251001')}")
-
-    roster = storage.get_roster()
-    total_opened = 0
-    total_stored = 0
-    consecutive_fails = 0
-    recalibrate_interval = 25  # Recalibrate after every 25 gifts
-
-    try:
-        async with TBBrowser(config, headless=headless) as browser:
-            await browser.login()
-            await browser.navigate_to_gifts()
-
-            log.info("Starting to open gifts (with data extraction)...")
-
-            # Keep clicking Open buttons until none are found
-            max_gifts = 500  # Safety limit
-
-            while total_opened < max_gifts:
-                # Recalibrate periodically to maintain accuracy
-                if total_opened > 0 and total_opened % recalibrate_interval == 0:
-                    log.info(f"Recalibrating after {total_opened} gifts...")
-                    await browser.recalibrate_open_button()
-
-                # Take screenshot to extract gift data before opening
-                screenshots = await browser.capture_gift_screenshots(count=1)
-
-                if not screenshots:
-                    log.info("No screenshots captured - ending gift opening")
-                    break
-
-                # Extract gift information from the screenshot
-                result = extract_gifts_from_screenshot(screenshots[0], config)
-
-                # Check if there are any gifts to open
-                if not result.gifts or len(result.gifts) == 0:
-                    # No gifts found, check if we should scroll or stop
-                    consecutive_fails += 1
-                    if consecutive_fails >= 3:
-                        log.info("No gifts found after 3 attempts - all gifts opened")
-                        break
-
-                    # Try scrolling to see if there are more gifts
-                    log.info("No gifts found on current page, trying to scroll...")
-                    await browser.scroll_gifts_down()
-                    await asyncio.sleep(1)  # Wait for scroll to settle
-                    continue  # Try again after scrolling
-
-                # Reset fail counter since we found gifts
-                consecutive_fails = 0
-
-                # Store the first gift's data (the one we're about to open)
-                top_gift = result.gifts[0]
-                gift_dict = top_gift.model_dump() if hasattr(top_gift, 'model_dump') else top_gift.dict()
-
-                # Fuzzy match player name against roster
-                if roster:
-                    gift_dict["player_name_raw"] = gift_dict["player_name"]
-                    matched = _fuzzy_match(gift_dict["player_name"], roster)
-                    if matched:
-                        gift_dict["player_name"] = matched
-
-                gift_dict["screenshot_ref"] = str(screenshots[0])
-
-                # Store the gift data
-                is_new = storage.store_chest(run_id, gift_dict)
-                if is_new:
-                    total_stored += 1
-                    log.info(f"Stored: {top_gift.player_name} / {top_gift.chest_type}")
-
-                # Now click the Open button on the first gift
-                clicked = await browser.click_open_first_gift()
-
-                if clicked:
-                    total_opened += 1
-                    log.info(f"Opened gift #{total_opened}")
-
-                    # Brief pause for the reward popup
-                    await browser.dismiss_reward_popup()
-                else:
-                    # Failed to click even though we found a gift
-                    log.warning("Found gift but failed to click Open button - may need recalibration")
-                    consecutive_fails += 1
-                    if consecutive_fails >= 3:
-                        log.info("Failed to click Open button 3 times - stopping")
-                        break
-
-        storage.complete_run(run_id, 1, total_opened, total_stored, 0.0)
-        log.info(
-            f"Gift opening complete: {total_opened} gifts opened, "
-            f"{total_stored} new records stored (clan: {clan_id})"
-        )
-
-    except Exception as e:
-        log.error(f"Gift opening failed: {e}", exc_info=True)
-        storage.fail_run(run_id, str(e))
-        raise
-    finally:
-        storage.close()
-
-
-# ── Chest Scanner ───────────────────────────────────────────────────────────
 
 async def run_chest_scan(config: dict):
-    """Execute a single chest scan cycle."""
+    """Execute a single chest scan cycle using the simplified vision-native loop."""
     from browser import TBBrowser
-    from vision import extract_gifts_from_screenshot, verify_with_stronger_model
+    from vision import find_first_gift, read_opened_chest
 
     cloud_mode = config.get("_cloud_mode", False)
-    clan_id = config.get("_clan_id", "local")
-    vision_cfg = config.get("vision", {})
-    scan_cfg = config.get("chest_counter", {})
+    headless = config.get("_headless", True)
 
     # Select storage backend
     if cloud_mode:
@@ -173,169 +62,108 @@ async def run_chest_scan(config: dict):
         from storage import Storage
 
     storage = Storage(config)
-    run_id = storage.start_run(vision_cfg.get("model_routine", "claude-haiku-4-5-20251001"))
-
-    total_found = 0
-    total_new = 0
-    total_pages = 0
-    total_cost = 0.0
-    headless = config.get("_headless", True)
-
-    # Add blob connection and run_id to config for debug screenshot uploads
-    if cloud_mode:
-        config["_blob_conn"] = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
-        config["_run_id"] = run_id
+    run_id = storage.start_run("claude-haiku-4-5-20251001")
+    run_gifts = []
 
     try:
         async with TBBrowser(config, headless=headless) as browser:
             await browser.login()
             await browser.navigate_to_gifts()
 
-            roster = storage.get_roster()
+            # Phase 1: find the first Open button (one-time)
+            log.info("Finding first Open button...")
+            png = await browser.page.screenshot()
+            b64 = base64.b64encode(png).decode()
+            del png  # Explicit release
 
-            # Prepare for screenshot uploads if in cloud mode
-            blob_conn = os.environ.get("AZURE_STORAGE_CONNECTION_STRING") if cloud_mode else None
-            uploaded_screenshots = []
+            first = await find_first_gift(b64, config)
+            del b64  # Explicit release
 
-            page = 0
-            max_pages = scan_cfg.get("max_pages", 10)
-            multi_frame = scan_cfg.get("multi_frame_count", 2)
+            if first.done:
+                log.info("No gifts to claim.")
+                storage.complete_run(run_id, 0, 0, 0)
+                return
 
-            while page < max_pages:
-                screenshots = await browser.capture_gift_screenshots(count=multi_frame)
+            click_x = OPEN_BUTTON_X
+            click_y = first.open_button_y
+            log.info(f"First Open button at ({click_x}, {click_y})")
 
-                if not screenshots:
-                    log.info("No screenshots captured — end of gifts or navigation issue.")
+            # Phase 2: click → read → repeat, cursor stays put
+            max_gifts = config.get("chest_counter", {}).get("max_gifts", 200)
+
+            for i in range(max_gifts):
+                # Log memory usage
+                try:
+                    with open('/proc/meminfo') as f:
+                        meminfo = f.read()
+                    mem_line = [l for l in meminfo.splitlines() if 'MemAvailable' in l]
+                    if mem_line:
+                        log.debug(f"Gift {i+1}: {mem_line[0].strip()}")
+                except Exception:
+                    pass
+
+                # Click the Open button
+                await browser.page.mouse.click(click_x, click_y)
+
+                # Brief pause for animation (the open is instant, but give UI time)
+                await asyncio.sleep(0.3)
+
+                # Screenshot and extract contents
+                png = await browser.page.screenshot()
+                b64 = base64.b64encode(png).decode()
+                del png  # Explicit release
+
+                result = await read_opened_chest(b64, config)
+                del b64  # Explicit release
+
+                if result.done:
+                    log.info(f"No more gifts after {i} opened.")
                     break
 
-                primary_screenshot = screenshots[0]
+                # Store the gift
+                run_gifts.append({
+                    "player_name": result.player_name,
+                    "chest_type": result.chest_type,
+                    "contents": [{"item": it.item, "quantity": it.quantity} for it in result.items],
+                    "opened_at": datetime.now(timezone.utc).isoformat(),
+                    "run_id": run_id,
+                })
+                items_preview = ", ".join(f"{it.item}x{it.quantity}" for it in result.items[:3])
+                log.info(f"[{i+1}] {result.player_name} — {result.chest_type}: {items_preview}")
 
-                # Upload screenshot to blob storage if configured
-                if blob_conn and cloud_mode:
-                    try:
-                        screenshot_url = _upload_scanner_screenshot(
-                            primary_screenshot,
-                            clan_id,
-                            run_id,
-                            page + 1,
-                            blob_conn
-                        )
-                        if screenshot_url:
-                            uploaded_screenshots.append(screenshot_url)
-                            log.info(f"Uploaded screenshot to: {screenshot_url}")
-                    except Exception as e:
-                        log.warning(f"Screenshot upload failed (non-fatal): {e}")
-
-                result = extract_gifts_from_screenshot(primary_screenshot, config)
-
-                if not result.gifts:
-                    log.info(f"Page {page + 1}: No gifts found — end of list.")
-                    break
-
-                log.info(f"Page {page + 1}: Extracted {len(result.gifts)} gifts")
-
-                for gift in result.gifts:
-                    gift_dict = gift.model_dump() if hasattr(gift, 'model_dump') else gift.dict()
-                    total_found += 1
-
-                    # Verify low-confidence extractions with Sonnet
-                    threshold = float(vision_cfg.get("verify_threshold", 0.85))
-                    if gift.confidence < threshold:
-                        log.info(
-                            f"Low confidence ({gift.confidence:.0%}) for "
-                            f"{gift.player_name}/{gift.chest_type} — verifying"
-                        )
-                        verified_result = verify_with_stronger_model(
-                            primary_screenshot, config
-                        )
-                        for vgift in verified_result.gifts:
-                            if vgift.player_name == gift.player_name:
-                                gift_dict = vgift.model_dump() if hasattr(vgift, 'model_dump') else vgift.dict()
-                                gift_dict["verified"] = True
-                                break
-
-                    # Fuzzy match player name against roster
-                    if roster:
-                        gift_dict["player_name_raw"] = gift_dict["player_name"]
-                        matched = _fuzzy_match(gift_dict["player_name"], roster)
-                        if matched:
-                            gift_dict["player_name"] = matched
-
-                    gift_dict["screenshot_ref"] = str(primary_screenshot)
-
-                    is_new = storage.store_chest(run_id, gift_dict)
-                    if is_new:
-                        total_new += 1
-
-                total_pages += 1
-
-                if not result.has_more:
-                    log.info("No more gifts indicated — scan complete.")
-                    break
-
-                await browser.scroll_gifts_down()
-                page += 1
-
-        storage.complete_run(run_id, total_pages, total_found, total_new, total_cost)
-        log.info(
-            f"Scan complete: {total_pages} pages, {total_found} gifts found, "
-            f"{total_new} new (clan: {clan_id})"
-        )
-
-        # Log uploaded screenshots for debugging
-        if uploaded_screenshots:
-            log.info(f"Screenshots uploaded for debugging: {len(uploaded_screenshots)} files")
-            for url in uploaded_screenshots[:3]:  # Show first 3 URLs
-                log.info(f"  Screenshot: {url}")
+                # Dismiss any reward popup that might appear
+                await browser.page.keyboard.press("Escape")
+                await asyncio.sleep(0.2)
 
     except Exception as e:
         log.error(f"Scan failed: {e}", exc_info=True)
         storage.fail_run(run_id, str(e))
         raise
-    finally:
-        storage.close()
 
+    # Bulk insert all gifts
+    for gift in run_gifts:
+        storage.store_chest(run_id, gift)
 
-def _fuzzy_match(name: str, roster: list[str], threshold: int = 80) -> str | None:
-    """Fuzzy match a player name against the clan roster."""
-    try:
-        from thefuzz import fuzz
-    except ImportError:
-        return None
-
-    best_score = 0
-    best_match = None
-    for candidate in roster:
-        score = fuzz.ratio(name.lower(), candidate.lower())
-        if score > best_score:
-            best_score = score
-            best_match = candidate
-
-    if best_score >= threshold:
-        if best_match != name:
-            log.debug(f"Fuzzy matched '{name}' → '{best_match}' ({best_score}%)")
-        return best_match
-    return None
+    storage.complete_run(run_id, 1, len(run_gifts), len(run_gifts))
+    log.info(f"Done. Stored {len(run_gifts)} gifts.")
+    storage.close()
 
 
 # ── Smoke Test ──────────────────────────────────────────────────────────────
 
+
 async def run_smoke_test(config: dict):
-    """Smoke test: login, navigate, screenshot, extract — but don't store chests."""
+    """Smoke test: login, navigate, find first gift — but don't open anything."""
     from browser import TBBrowser
-    from vision import extract_gifts_from_screenshot
+    from vision import find_first_gift
 
-    cloud_mode = config.get("_cloud_mode", False)
-    clan_id = config.get("_clan_id", "local")
-    vision_cfg = config.get("vision", {})
     headless = config.get("_headless", True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-    screenshot_dir = Path(config.get("storage", {}).get("screenshot_dir", "/tmp/smoke-screenshots"))
+    screenshot_dir = Path("/tmp/screenshots")
     screenshot_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     results = {
-        "clan_id": clan_id,
         "timestamp": timestamp,
         "steps": {},
         "passed": False,
@@ -361,38 +189,36 @@ async def run_smoke_test(config: dict):
             await browser.page.screenshot(path=str(gifts_shot))
             log.info(f"[smoke] Screenshot: {gifts_shot}")
 
-            # Step 3: Capture + Vision extraction (page 1 only)
-            log.info("[smoke] Step 3: Vision extraction...")
-            screenshots = await browser.capture_gift_screenshots(count=1)
+            # Step 3: Find first Open button
+            log.info("[smoke] Step 3: Find first Open button...")
+            png = await browser.page.screenshot()
+            b64 = base64.b64encode(png).decode()
+            del png
 
-            if not screenshots:
-                results["steps"]["capture"] = "failed — no screenshots"
-                raise RuntimeError("Screenshot capture returned empty")
+            first = await find_first_gift(b64, config)
+            del b64
 
-            results["steps"]["capture"] = "passed"
-            result = extract_gifts_from_screenshot(screenshots[0], config)
+            results["steps"]["find_first"] = "passed"
+            results["first_gift"] = {
+                "done": first.done,
+                "player_name": first.player_name,
+                "chest_type": first.chest_type,
+                "open_button_y": first.open_button_y,
+            }
 
-            results["steps"]["vision"] = "passed"
-            results["gifts_extracted"] = len(result.gifts)
-            results["has_more"] = result.has_more
-            results["extraction_notes"] = result.extraction_notes
-
-            for gift in result.gifts:
-                log.info(f"[smoke]   {gift.player_name} / {gift.chest_type} (conf: {gift.confidence})")
-
-            # Step 4: Scroll test
-            if result.has_more:
-                log.info("[smoke] Step 4: Scroll test...")
-                await browser.scroll_gifts_down()
-                scroll_shot = screenshot_dir / f"smoke_{timestamp}_03_scrolled.png"
-                await browser.page.screenshot(path=str(scroll_shot))
-                results["steps"]["scroll"] = "passed"
-                log.info(f"[smoke] Screenshot: {scroll_shot}")
+            if first.done:
+                log.info("[smoke] No gifts found (empty list)")
             else:
-                results["steps"]["scroll"] = "skipped — no more gifts"
+                log.info(f"[smoke] First gift: {first.player_name} — {first.chest_type} at y={first.open_button_y}")
+
+                # Verify y coordinate is in reasonable range
+                if 150 <= first.open_button_y <= 600:
+                    log.info(f"[smoke] Y coordinate {first.open_button_y} is in valid range (150-600)")
+                else:
+                    log.warning(f"[smoke] Y coordinate {first.open_button_y} is outside expected range (150-600)")
 
         results["passed"] = True
-        log.info(f"[smoke] All steps passed. {results.get('gifts_extracted', 0)} gifts extracted.")
+        log.info("[smoke] All steps passed.")
 
     except Exception as e:
         log.error(f"[smoke] Failed: {e}", exc_info=True)
@@ -405,92 +231,21 @@ async def run_smoke_test(config: dict):
         json.dump(results, f, indent=2)
     log.info(f"[smoke] Results: {results_path}")
 
-    # Record in database if cloud mode
-    if cloud_mode:
-        try:
-            from storage_pg import Storage
-            storage = Storage(config)
-            run_id = storage.start_run(f"smoke:{vision_cfg.get('model_routine', 'unknown')}")
-            if results["passed"]:
-                storage.complete_run(run_id, 1, results.get("gifts_extracted", 0), 0)
-            else:
-                storage.fail_run(run_id, results.get("error", "unknown"))
-            storage.close()
-        except Exception as e:
-            log.warning(f"[smoke] Could not record to DB (non-fatal): {e}")
-
-    # Upload screenshots to blob storage if configured
-    blob_conn = os.environ.get("SMOKE_BLOB_CONNECTION")
-    if blob_conn:
-        _upload_smoke_screenshots(screenshot_dir, timestamp, blob_conn)
-
     if not results["passed"]:
         sys.exit(1)
 
 
-def _upload_smoke_screenshots(screenshot_dir: Path, timestamp: str, conn_string: str):
-    """Upload smoke screenshots to Azure Blob Storage."""
-    try:
-        from azure.storage.blob import BlobServiceClient
-        client = BlobServiceClient.from_connection_string(conn_string)
-        container = client.get_container_client("smoke-screenshots")
-        for f in screenshot_dir.glob(f"smoke_{timestamp}*"):
-            with open(f, "rb") as data:
-                container.upload_blob(f.name, data, overwrite=True)
-            log.info(f"[smoke] Uploaded {f.name} to blob storage")
-    except ImportError:
-        log.warning("[smoke] azure-storage-blob not installed — skipping upload")
-    except Exception as e:
-        log.warning(f"[smoke] Blob upload failed (non-fatal): {e}")
-
-
-def _upload_scanner_screenshot(screenshot_path: Path, clan_id: str, run_id: int,
-                               page_num: int, conn_string: str) -> str:
-    """Upload scanner screenshot to Azure Blob Storage and return URL."""
-    try:
-        from azure.storage.blob import BlobServiceClient
-
-        client = BlobServiceClient.from_connection_string(conn_string)
-        container_name = "scanner-screenshots"
-        container = client.get_container_client(container_name)
-
-        # Ensure container exists
-        try:
-            container.create_container(public_access="blob")
-        except:
-            pass  # Container already exists
-
-        # Create blob name with run context
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        blob_name = f"{clan_id}/run_{run_id}/page_{page_num:02d}_{timestamp}.png"
-
-        # Upload the screenshot
-        with open(screenshot_path, "rb") as data:
-            container.upload_blob(blob_name, data, overwrite=True)
-
-        # Return the public URL
-        return f"https://{client.account_name}.blob.core.windows.net/{container_name}/{blob_name}"
-
-    except ImportError:
-        log.warning("[scanner] azure-storage-blob not installed — skipping upload")
-        return None
-    except Exception as e:
-        log.warning(f"[scanner] Screenshot upload failed: {e}")
-        return None
-
-
 # ── CLI ─────────────────────────────────────────────────────────────────────
+
 
 def main():
     parser = argparse.ArgumentParser(description="TB Chest Counter")
-    parser.add_argument("command", choices=["chests", "smoke", "export"],
-                        help="chests: run scanner | smoke: smoke test | export: dump CSV")
+    parser.add_argument("command", choices=["chests", "smoke"],
+                        help="chests: run scanner | smoke: smoke test")
     parser.add_argument("--cloud", action="store_true",
                         help="Cloud mode — read config from env vars")
     parser.add_argument("--visible", action="store_true",
                         help="Show browser window (local dev)")
-    parser.add_argument("--open", action="store_true",
-                        help="Open mode — click Open on each gift instead of just scanning")
     parser.add_argument("--verbose", "-v", action="store_true")
 
     args = parser.parse_args()
@@ -504,26 +259,10 @@ def main():
     # Set headless based on --visible flag
     config["_headless"] = not args.visible
 
-    # Set open mode if specified
-    config["_open_mode"] = args.open if hasattr(args, 'open') else False
-
     if scan_mode == "chests":
-        if config["_open_mode"]:
-            asyncio.run(run_chest_open(config))
-        else:
-            asyncio.run(run_chest_scan(config))
-
+        asyncio.run(run_chest_scan(config))
     elif scan_mode == "smoke":
         asyncio.run(run_smoke_test(config))
-
-    elif args.command == "export":
-        if config.get("_cloud_mode"):
-            log.error("Export is for local mode only. Use the dashboard in cloud mode.")
-            sys.exit(1)
-        from storage import Storage
-        storage = Storage(config)
-        storage.export_csv()
-        storage.close()
 
 
 if __name__ == "__main__":

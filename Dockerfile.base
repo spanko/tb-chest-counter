@@ -1,28 +1,22 @@
 # ============================================================================
 # TB Chest Scanner — BASE IMAGE
-# Pre-bakes Playwright + Chromium + Python deps so scanner builds are fast.
+# Pre-bakes Python deps so scanner builds are fast (~5s).
 #
 # Build this ONCE (or when requirements.txt changes):
-#   az acr build --registry <ACR> --image tb-scanner-base:v1 --file Dockerfile.base .
+#   az acr build --registry tbdevacrb7jbhj --image tb-scanner-base:v2 --file Dockerfile.base .
 #
 # Then Dockerfile.scanner layers only src/config/data on top (~seconds).
 # ============================================================================
 
-FROM mcr.microsoft.com/playwright/python:v1.49.0-noble
+# jammy (22.04) over noble (24.04): smaller, more stable for headless Linux
+# Chromium is already in this image — do NOT run playwright install
+FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
 
 WORKDIR /app
 
-# Install Python dependencies (heaviest layer — cached in base image)
+# Install Python dependencies (~30s, only reruns when requirements.txt changes)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright Chromium (saves ~400MB vs all browsers)
-RUN playwright install chromium --with-deps
-
 # Pre-create data directories
 RUN mkdir -p /app/data/screenshots /app/data/browser_data /tmp/screenshots
-
-# Label for traceability
-LABEL maintainer="adam@secretgolfsociety.com" \
-      purpose="tb-chest-scanner-base" \
-      description="Pre-built base with Playwright+Chromium+deps for fast scanner iteration"

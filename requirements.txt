@@ -1,26 +1,4 @@
-# Browser automation
-playwright>=1.40.0
-
-# Claude Vision API
+playwright>=1.49.0
 anthropic>=0.39.0
-
-# Structured output validation
-pydantic>=2.0.0
-
-# Fuzzy string matching (player name validation)
-thefuzz[speedup]>=0.22.0
-
-# PostgreSQL (cloud mode)
 psycopg2-binary>=2.9.9
-
-# Azure Storage (cloud mode screenshots)
-azure-storage-blob>=12.19.0
-
-# Database and export (local mode)
-# sqlite3 is built-in
-
-# Web dashboard (local mode only)
-flask>=3.0.0
-
-# Image handling
-Pillow>=10.0.0
+pydantic>=2.0.0

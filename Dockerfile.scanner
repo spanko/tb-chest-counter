@@ -1,21 +1,12 @@
 # ============================================================================
 # TB Chest Scanner — SCANNER IMAGE
-# Thin layer on pre-built base. Code changes rebuild in seconds.
+# Thin layer on pre-built base. Code changes rebuild in ~5 seconds.
 #
-# Prerequisites:
-#   Base image must exist in ACR (build once with Dockerfile.base)
-#
-# Build locally (fastest iteration):
-#   docker build -f Dockerfile.scanner -t tb-chest-scanner:dev .
-#   docker tag tb-chest-scanner:dev <ACR>.azurecr.io/tb-chest-scanner:candidate
-#   docker push <ACR>.azurecr.io/tb-chest-scanner:candidate
-#
-# Build in ACR (still fast — base is cached in registry):
-#   az acr build --registry <ACR> --image tb-chest-scanner:candidate \
+# Build in ACR:
+#   az acr build --registry tbdevacrb7jbhj --image tb-chest-scanner:candidate \
 #     --file Dockerfile.scanner .
 # ============================================================================
 
-# --- CHANGE THIS to your ACR server ---
 ARG ACR_SERVER=tbdevacrb7jbhj.azurecr.io
 ARG BASE_TAG=v1
 
@@ -30,5 +21,8 @@ COPY config/ ./config/
 # Copy calibration profile (pre-calibrated at 1280x720)
 COPY data/calibration.json ./data/calibration.json
 
-# Scanner entrypoint — reads clan config from env vars
-CMD ["python", "src/main.py", "chests", "--cloud"]
+# Copy browser data with pre-baked session cookies
+COPY data/browser_data/ ./data/browser_data/
+
+# Scanner entrypoint
+CMD ["python", "src/main.py", "smoke", "--cloud"]
