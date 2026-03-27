@@ -191,7 +191,7 @@ async def run_smoke_test(config: dict):
 
             # Step 3: Find first Open button
             log.info("[smoke] Step 3: Find first Open button...")
-            png = await browser.page.screenshot()
+            png = await browser.page.screenshot(timeout=60000)
             b64 = base64.b64encode(png).decode()
             del png
 
