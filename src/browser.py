@@ -572,9 +572,9 @@ class TBBrowser:
     async def _click_bonus_sales_x(self):
         """Close the Bonus Sales store by clicking the X button.
 
-        The X button is at the far right edge of the screen, around x=1270.
+        Uses Vision to detect the X button location dynamically.
         """
-        log.info("Closing Bonus Sales store by clicking X button...")
+        log.info("Closing Bonus Sales store...")
 
         # Check if page is still alive before trying to interact
         try:
@@ -583,33 +583,82 @@ class TBBrowser:
             log.error(f"Page is no longer available: {e}")
             return
 
-        # X button is at (1256, 67) - confirmed by Vision API
-        x_coords = [
-            (1256, 67),   # Primary target - Vision API confirmed
-            (1254, 65),   # Slightly left/up
-            (1258, 69),   # Slightly right/down
-        ]
-
+        # Take screenshot and use Vision to find X button
         try:
-            for x, y in x_coords:
-                log.info(f"Clicking X at ({x}, {y})...")
+            import base64
+            png = await self.page.screenshot()
+            b64 = base64.b64encode(png).decode()
+            del png
+
+            # Use Vision to find X button on store overlay
+            x_info = await self._detect_store_x_button(b64)
+            del b64
+
+            if x_info.get("has_store") and x_info.get("x_coords"):
+                x, y = x_info["x_coords"]["x"], x_info["x_coords"]["y"]
+                log.info(f"Vision found store X button at ({x}, {y})")
                 await self.page.mouse.click(x, y)
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1)
+                log.info("Clicked store X button.")
+            else:
+                log.info("No store overlay detected by Vision.")
+
         except Exception as e:
-            log.warning(f"Error clicking X: {e}")
-            return
+            log.warning(f"Vision-based store close failed: {e}")
+            # Fallback: try ESC key
+            log.info("Falling back to ESC key...")
+            await self.page.keyboard.press("Escape")
+            await asyncio.sleep(0.5)
 
-        # Wait for store to close
-        log.info("Waiting for store to close...")
-        await asyncio.sleep(2)
+        log.info("Bonus Sales close complete.")
 
-        # Try to take screenshot
-        try:
-            await self._debug_screenshot("after_x_click")
-        except Exception as e:
-            log.warning(f"Could not capture after_x_click screenshot: {e}")
+    async def _detect_store_x_button(self, b64_image: str) -> dict:
+        """Use Vision to detect the store X button location."""
+        import anthropic
 
-        log.info("Bonus Sales X click complete.")
+        prompt = """Look at this Total Battle game screenshot at 1280x720 resolution.
+
+Is there a store/shop overlay panel visible? If yes, find the X (close) button on that panel.
+
+Return JSON only:
+{
+  "has_store": true,
+  "x_coords": {"x": 870, "y": 65},
+  "description": "Bonus Sales store panel with X button in top-right of panel"
+}
+
+If no store overlay is visible:
+{"has_store": false, "x_coords": null, "description": "No store overlay"}
+
+Return only valid JSON, no markdown."""
+
+        api_key = self.config["vision"]["anthropic_api_key"]
+        model = self.config["vision"].get("model_routine", "claude-haiku-4-5-20251001")
+
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model=model,
+            max_tokens=256,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": b64_image}},
+                    {"type": "text", "text": prompt}
+                ]
+            }]
+        )
+
+        import json
+        text = response.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        text = text.strip()
+
+        result = json.loads(text)
+        log.info(f"Store detection: {result}")
+        return result
 
     # ── Navigation (calibration-based) ──────────────────────────────────
 
