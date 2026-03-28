@@ -31,9 +31,8 @@ from storage_azure import upload_screenshot
 
 log = logging.getLogger("tb-scanner")
 
-# Fixed x coordinate — all Open buttons are in the same column
-# Calibrated at 1280x720. The Gifts panel is centered, buttons around x=770.
-OPEN_BUTTON_X = 770
+# Note: Open button coordinates are now detected by Vision on first find.
+# All subsequent clicks use the same (x, y) since gifts stack in place.
 
 
 def setup_logging(verbose: bool = False):
@@ -93,9 +92,9 @@ async def run_chest_scan(config: dict):
                 storage.complete_run(run_id, 0, 0, 0)
                 return
 
-            click_x = OPEN_BUTTON_X
+            click_x = first.open_button_x
             click_y = first.open_button_y
-            log.info(f"First Open button at ({click_x}, {click_y})")
+            log.info(f"First Open button at ({click_x}, {click_y}) — will click here for all gifts")
 
             # Phase 2: click → read → repeat, cursor stays put
             max_gifts = config.get("chest_counter", {}).get("max_gifts", 200)

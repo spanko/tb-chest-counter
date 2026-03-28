@@ -22,6 +22,7 @@ class FirstGiftResult:
     done: bool  # True if no gifts to claim
     player_name: str
     chest_type: str
+    open_button_x: int  # X coordinate of the first Open button
     open_button_y: int  # Y coordinate of the first Open button
 
 
@@ -51,18 +52,19 @@ The gift list shows rows of chests sent by clan members. Each row shows:
 - A button on the right side to claim/open the chest
 
 Find the FIRST (topmost) gift row that has a claimable chest with a button.
+Return the EXACT pixel coordinates of the center of that button.
 
 Return JSON only:
 {
   "done": false,
   "player_name": "PlayerName",
   "chest_type": "Forgotten Chest",
+  "open_button_x": 770,
   "open_button_y": 230
 }
 
 Set done=true ONLY if there are NO gift rows visible at all (empty list).
-If you see gift rows with chests, return done=false and provide the y-coordinate of the first row's button.
-The button is on the right side of the row, around x=750-800.
+If you see gift rows with chests, return done=false and provide BOTH x and y coordinates.
 
 Return only valid JSON, no markdown."""
 
@@ -157,19 +159,20 @@ async def find_first_gift(b64_image: str, config: dict) -> FirstGiftResult:
             done=data.get("done", False),
             player_name=data.get("player_name", ""),
             chest_type=data.get("chest_type", ""),
+            open_button_x=data.get("open_button_x", 770),  # Default fallback
             open_button_y=data.get("open_button_y", 0),
         )
 
         if result.done:
             log.info("find_first_gift: No gifts to claim")
         else:
-            log.info(f"find_first_gift: Found '{result.chest_type}' from {result.player_name} at y={result.open_button_y}")
+            log.info(f"find_first_gift: Found '{result.chest_type}' from {result.player_name} at ({result.open_button_x}, {result.open_button_y})")
 
         return result
 
     except (json.JSONDecodeError, KeyError) as e:
         log.error(f"find_first_gift: Failed to parse response: {e}")
-        return FirstGiftResult(done=True, player_name="", chest_type="", open_button_y=0)
+        return FirstGiftResult(done=True, player_name="", chest_type="", open_button_x=770, open_button_y=0)
 
 
 async def read_opened_chest(b64_image: str, config: dict) -> OpenedChestResult:
