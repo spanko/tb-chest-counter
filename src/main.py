@@ -50,7 +50,7 @@ def setup_logging(verbose: bool = False):
 async def run_chest_scan(config: dict):
     """Execute a single chest scan cycle using the simplified vision-native loop."""
     from browser import TBBrowser
-    from vision import find_first_gift, read_opened_chest
+    from vision import find_first_gift
 
     cloud_mode = config.get("_cloud_mode", False)
     headless = config.get("_headless", True)
@@ -92,86 +92,59 @@ async def run_chest_scan(config: dict):
                 storage.complete_run(run_id, 0, 0, 0)
                 return
 
-            click_x = first.open_button_x
-            click_y = first.open_button_y
-            log.info(f"First Open button at ({click_x}, {click_y}) — will click here for all gifts")
-
-            # Phase 2: click → read → repeat, cursor stays put
+            # Phase 2: Loop - detect gift, click, store, repeat
+            # We get player_name and chest_type from find_first_gift BEFORE clicking
             max_gifts = config.get("chest_counter", {}).get("max_gifts", 200)
+            current_gift = first  # Start with the first gift we already found
 
             for i in range(max_gifts):
-                # Log memory usage
-                try:
-                    with open('/proc/meminfo') as f:
-                        meminfo = f.read()
-                    mem_line = [l for l in meminfo.splitlines() if 'MemAvailable' in l]
-                    if mem_line:
-                        log.debug(f"Gift {i+1}: {mem_line[0].strip()}")
-                except Exception:
-                    pass
+                # We already have the gift info from find_first_gift
+                player_name = current_gift.player_name
+                chest_type = current_gift.chest_type
+                click_x = current_gift.open_button_x
+                click_y = current_gift.open_button_y
+
+                log.info(f"[{i+1}] Opening {chest_type} from {player_name} at ({click_x}, {click_y})...")
 
                 # Click the Open button
-                log.info(f"Clicking Open button at ({click_x}, {click_y})...")
                 await browser.page.mouse.click(click_x, click_y)
 
-                # Brief pause for animation (the open is instant, but give UI time)
-                await asyncio.sleep(1.0)  # Increased from 0.3 to allow animation
-
-                # Screenshot and extract contents
-                png = await browser.page.screenshot()
-                b64 = base64.b64encode(png).decode()
-
-                # Save debug screenshot after click
-                debug_after = Path("/tmp/screenshots") / f"after_click_{i}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                with open(debug_after, "wb") as f:
-                    f.write(base64.b64decode(b64))
-                log.info(f"After-click screenshot: {debug_after}")
-                # Upload to blob for debugging
-                upload_screenshot(str(debug_after), f"debug/after_click_{i}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
-
-                del png  # Explicit release
-
-                result = await read_opened_chest(b64, config)
-                del b64  # Explicit release
-
-                if result.done:
-                    log.info(f"No more gifts after {i} opened.")
-                    break
-
-                # Check if click missed (empty items means gift list still showing)
-                if not result.items:
-                    log.warning(f"Click missed - no chest opened. Re-detecting Open button...")
-                    # Re-detect the Open button position
-                    png = await browser.page.screenshot()
-                    b64 = base64.b64encode(png).decode()
-                    del png
-                    retry_first = await find_first_gift(b64, config)
-                    del b64
-                    if retry_first.done:
-                        log.info("No more gifts found on retry.")
-                        break
-                    click_x = retry_first.open_button_x
-                    click_y = retry_first.open_button_y
-                    log.info(f"Re-detected Open button at ({click_x}, {click_y})")
-                    continue  # Retry the click with new coordinates
-
-                # Store the gift IMMEDIATELY to database (in case of crash/timeout)
+                # Store the gift IMMEDIATELY (we already know player and chest type)
                 gift_data = {
-                    "player_name": result.player_name,
-                    "chest_type": result.chest_type,
-                    "contents": [{"item": it.item, "quantity": it.quantity} for it in result.items],
+                    "player_name": player_name,
+                    "chest_type": chest_type,
+                    "contents": [],  # We don't capture contents anymore
                     "opened_at": datetime.now(timezone.utc).isoformat(),
                     "run_id": run_id,
                 }
                 storage.store_chest(run_id, gift_data)
-                run_gifts.append(gift_data)  # Keep track for final count
+                run_gifts.append(gift_data)
 
-                items_preview = ", ".join(f"{it.item}x{it.quantity}" for it in result.items[:3])
-                log.info(f"[{i+1}] {result.player_name} — {result.chest_type}: {items_preview}")
+                log.info(f"[{i+1}] Stored: {player_name} — {chest_type}")
 
-                # Dismiss any reward popup that might appear
-                await browser.page.keyboard.press("Escape")
-                await asyncio.sleep(0.2)
+                # Brief pause for UI to update
+                await asyncio.sleep(0.3)
+
+                # Take screenshot and find the NEXT gift
+                png = await browser.page.screenshot()
+                b64 = base64.b64encode(png).decode()
+                del png
+
+                # Upload debug screenshot
+                debug_after = Path("/tmp/screenshots") / f"after_click_{i}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                with open(debug_after, "wb") as f:
+                    f.write(base64.b64decode(b64))
+                upload_screenshot(str(debug_after), f"debug/after_click_{i}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
+
+                # Find next gift
+                next_gift = await find_first_gift(b64, config)
+                del b64
+
+                if next_gift.done:
+                    log.info(f"No more gifts after {i+1} opened.")
+                    break
+
+                current_gift = next_gift
 
     except Exception as e:
         log.error(f"Scan failed: {e}", exc_info=True)

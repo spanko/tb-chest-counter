@@ -193,56 +193,54 @@ class PopupDetectionResult:
 
 POPUP_DETECTION_PROMPT = """You are looking at a Total Battle game screenshot at 1280x720.
 
-We are trying to reach the Gifts tab to open chests. Check if ANYTHING is blocking access to the Gifts tab.
+Look for any POPUP or OVERLAY blocking the main game view. A popup is:
+- A rectangular panel/dialog floating IN FRONT of the game
+- Usually centered or prominent on screen
+- Has an X (close) button in its upper-right corner
+- May have a darker/dimmed background behind it
 
-BLOCKERS that need to be closed:
-- Store overlays (Bonus Sales, Special Offers, item shops with prices)
+Common popup types that MUST be closed:
+- Store/shop panels (Bonus Sales, Special Offers, item shops with prices)
+- Info panels ("Great Archaeologist", tutorials, help screens)
 - Proposal/offer dialogs ("A proposal from...")
 - Payment dialogs with USD prices
-- Help panels or tutorials
-- Any centered popup or modal dialog
-- Achievement notifications
-- Event banners that cover the screen
-- The "Great Archaeologist" or similar informational popups
+- Achievement/reward notifications
+- Event banners or announcements
 
-NOT BLOCKERS (these are OK):
-- The Clan panel showing the Gifts tab with rows of chests
-- A list of chests showing player names and "Open" buttons
-- Normal game UI (bottom navigation, resources bar)
+CRITICAL: The X button is ALWAYS in the upper-right corner OF THE POPUP PANEL ITSELF.
+This is NOT the screen edge - look 20-40 pixels inside from the panel's top-right corner.
+The X is usually a small icon or button within the popup's border.
 
-If there IS a blocker, determine how to close it:
-1. Look for an X button on the popup - provide exact pixel coordinates
-2. If no X button, suggest clicking outside the dialog (dark margins)
-3. If it looks like a simple notification, ESC might work
+What is NOT a popup (do NOT report as blocker):
+- The Clan panel on the left side with Gifts/Members tabs
+- The gift list showing player names and "Open" buttons
+- Bottom navigation bar
+- Top resource bar
+- Normal game UI elements
+
+If you find a popup:
+1. Identify the X button in its upper-right corner
+2. Return the EXACT pixel coordinates of the X button center
 
 Return JSON only (no markdown):
 {
   "has_blocker": true,
-  "description": "Bonus Sales store showing items for sale",
+  "description": "Great Archaeologist info panel",
   "close_method": "x_button",
   "x": 875,
-  "y": 52
+  "y": 95
 }
 
-For click_outside:
+If no X visible, click outside the popup:
 {
   "has_blocker": true,
-  "description": "Payment dialog",
+  "description": "Payment dialog without clear X",
   "close_method": "click_outside",
   "x": 50,
   "y": 400
 }
 
-For escape:
-{
-  "has_blocker": true,
-  "description": "Small notification popup",
-  "close_method": "escape",
-  "x": 0,
-  "y": 0
-}
-
-If no blocker:
+If no popup found:
 {
   "has_blocker": false,
   "description": "Clan Gifts tab visible with chest rows",
