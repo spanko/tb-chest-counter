@@ -32,8 +32,8 @@ from storage_azure import upload_screenshot
 log = logging.getLogger("tb-scanner")
 
 # Fixed x coordinate — all Open buttons are in the same column
-# Calibrated at 1280x720. Adjust if viewport changes.
-OPEN_BUTTON_X = 995
+# Calibrated at 1280x720. The Gifts panel is centered, buttons around x=770.
+OPEN_BUTTON_X = 770
 
 
 def setup_logging(verbose: bool = False):
