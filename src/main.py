@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from config import load_config
+from storage_azure import upload_screenshot
 
 log = logging.getLogger("tb-scanner")
 
@@ -87,6 +88,8 @@ async def run_chest_scan(config: dict):
 
             if first.done:
                 log.warning(f"Vision returned done=true. Debug screenshot at: {debug_path}")
+                # Upload to blob storage for investigation
+                upload_screenshot(str(debug_path), f"debug/no_gifts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
                 storage.complete_run(run_id, 0, 0, 0)
                 return
 
