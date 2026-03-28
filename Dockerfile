@@ -30,6 +30,9 @@ COPY config/ ./config/
 # Copy calibration profile (pre-calibrated at 1280x720)
 COPY data/calibration.json ./data/calibration.json
 
+# Copy browser data with pre-baked session cookies to bypass login
+COPY data/browser_data/ ./data/browser_data/
+
 # Ensure data directories exist
 RUN mkdir -p /app/data/screenshots /app/data/browser_data /tmp/screenshots
 

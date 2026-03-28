@@ -122,6 +122,7 @@ async def run_chest_scan(config: dict):
                     gift_data = {
                         "player_name": gift.player_name,
                         "chest_type": gift.chest_type,
+                        "time_left": gift.time_left,  # Unique per chest - used for dedup
                         "contents": [],
                         "opened_at": datetime.now(timezone.utc).isoformat(),
                         "run_id": run_id,

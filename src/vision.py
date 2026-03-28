@@ -32,6 +32,7 @@ class GiftInfo:
     player_name: str
     chest_type: str
     open_button_y: int  # Y coordinate of the Open button
+    time_left: str  # Time remaining like "23 hr 45 min" - unique per chest
 
 
 @dataclass
@@ -65,11 +66,13 @@ FIND_ALL_GIFTS_PROMPT = """You are looking at the Total Battle Clan Gifts tab at
 The gift list shows rows of chests sent by clan members. Each row shows:
 - A chest icon on the left
 - Player name and chest type (e.g. "Forgotten Chest", "Sapphire Chest", "Barbarian Chest")
+- Time remaining text (e.g. "Time left: 23 hr 45 min" or "22 hr 13 min")
 - An "Open" button on the right side
 
 List ALL visible gift rows from TOP to BOTTOM. For each gift, provide:
 - player_name: The player who sent it
 - chest_type: The type of chest (e.g. "Orc Chest", "Sand Chest", "Elegant Chest")
+- time_left: The time remaining text exactly as shown (e.g. "23 hr 45 min")
 - open_button_y: The Y pixel coordinate of that row's Open button
 
 The Open buttons are all at the same X coordinate (around 770).
@@ -79,10 +82,10 @@ Return JSON only:
   "done": false,
   "open_button_x": 770,
   "gifts": [
-    {"player_name": "Player1", "chest_type": "Orc Chest", "open_button_y": 195},
-    {"player_name": "Player2", "chest_type": "Sand Chest", "open_button_y": 255},
-    {"player_name": "Player3", "chest_type": "Elegant Chest", "open_button_y": 315},
-    {"player_name": "Player4", "chest_type": "Forgotten Chest", "open_button_y": 375}
+    {"player_name": "Player1", "chest_type": "Orc Chest", "time_left": "23 hr 45 min", "open_button_y": 195},
+    {"player_name": "Player2", "chest_type": "Sand Chest", "time_left": "22 hr 13 min", "open_button_y": 255},
+    {"player_name": "Player3", "chest_type": "Elegant Chest", "time_left": "21 hr 30 min", "open_button_y": 315},
+    {"player_name": "Player4", "chest_type": "Forgotten Chest", "time_left": "20 hr 55 min", "open_button_y": 375}
   ]
 }
 
@@ -213,6 +216,7 @@ async def find_all_visible_gifts(b64_image: str, config: dict) -> AllGiftsResult
                 player_name=gift_data.get("player_name", ""),
                 chest_type=gift_data.get("chest_type", ""),
                 open_button_y=gift_data.get("open_button_y", 0),
+                time_left=gift_data.get("time_left", ""),
             ))
 
         result = AllGiftsResult(

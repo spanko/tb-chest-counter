@@ -50,22 +50,22 @@ app.all('/api/admin', async (req, res) => {
             completed_at,
             status,
             pages_scanned,
-            gifts_found,
-            new_gifts,
+            chests_found as gifts_found,
+            chests_new as new_gifts,
             error_message,
-            model_used,
+            vision_model as model_used,
             CASE
               WHEN completed_at IS NOT NULL
               THEN EXTRACT(EPOCH FROM (completed_at - started_at))::int
               ELSE NULL
             END as duration_seconds
-          FROM runs
+          FROM scan_runs
           WHERE clan_id = $1
           ORDER BY started_at DESC
           LIMIT 10
         `;
 
-        const runs = await pool.query(runsQuery, ['FOR']);
+        const runs = await pool.query(runsQuery, ['for-main']);
 
         // Get summary stats
         const statsQuery = `
@@ -79,7 +79,7 @@ app.all('/api/admin', async (req, res) => {
           AND scanned_at > NOW() - INTERVAL '7 days'
         `;
 
-        const stats = await pool.query(statsQuery, ['FOR']);
+        const stats = await pool.query(statsQuery, ['for-main']);
 
         res.json({
           runs: runs.rows.map(r => ({
@@ -105,19 +105,19 @@ app.all('/api/admin', async (req, res) => {
             status,
             COALESCE(error_message,
               CASE
-                WHEN status = 'completed' THEN 'Run completed: ' || gifts_found || ' gifts found, ' || new_gifts || ' new'
+                WHEN status = 'completed' THEN 'Run completed: ' || chests_found || ' chests found, ' || chests_new || ' new'
                 WHEN status = 'running' THEN 'Run started'
                 ELSE 'Run ' || status
               END
             ) as message
-          FROM runs
+          FROM scan_runs
           WHERE clan_id = $1
             AND started_at > NOW() - INTERVAL '1 hour'
           ORDER BY started_at DESC
           LIMIT 50
         `;
 
-        const logs = await pool.query(logsQuery, ['FOR']);
+        const logs = await pool.query(logsQuery, ['for-main']);
 
         res.json({
           logs: logs.rows.map(l => ({
@@ -134,29 +134,30 @@ app.all('/api/admin', async (req, res) => {
         const jobName = triggerBody.jobName || 'tbdev-scan-for-main';
 
         try {
-          // First try to create the table if it doesn't exist
+          // First try to create the table if it doesn't exist (use scan_runs schema)
           await pool.query(`
-            CREATE TABLE IF NOT EXISTS runs (
+            CREATE TABLE IF NOT EXISTS scan_runs (
               run_id SERIAL PRIMARY KEY,
               clan_id VARCHAR(50) NOT NULL,
               started_at TIMESTAMP DEFAULT NOW(),
               completed_at TIMESTAMP,
               status VARCHAR(50) DEFAULT 'requested',
               pages_scanned INTEGER DEFAULT 0,
-              gifts_found INTEGER DEFAULT 0,
-              new_gifts INTEGER DEFAULT 0,
+              chests_found INTEGER DEFAULT 0,
+              chests_new INTEGER DEFAULT 0,
               error_message TEXT,
-              model_used VARCHAR(100)
+              vision_model VARCHAR(100),
+              vision_cost_usd NUMERIC(10,4) DEFAULT 0
             )
           `);
 
           // Log the trigger request in database
           const logQuery = `
-            INSERT INTO runs (clan_id, started_at, status, model_used)
+            INSERT INTO scan_runs (clan_id, started_at, status, vision_model)
             VALUES ($1, NOW(), 'requested', 'manual')
             RETURNING run_id
           `;
-          const result = await pool.query(logQuery, ['FOR']);
+          const result = await pool.query(logQuery, ['for-main']);
 
           res.json({
             success: true,
@@ -196,14 +197,14 @@ app.all('/api/admin', async (req, res) => {
 
         // Check if tables exist and have data
         if (diagnostics.connection) {
-          // Check runs table
+          // Check scan_runs table
           try {
             const runsCheck = await pool.query(`
               SELECT COUNT(*) as count,
                      MAX(started_at) as last_run
-              FROM runs
+              FROM scan_runs
               WHERE clan_id = $1
-            `, ['FOR']);
+            `, ['for-main']);
             diagnostics.tables.runs = {
               exists: true,
               count: parseInt(runsCheck.rows[0].count),
@@ -237,7 +238,7 @@ app.all('/api/admin', async (req, res) => {
                      MAX(scanned_at) as last_scan
               FROM chests
               WHERE clan_id = $1
-            `, ['FOR']);
+            `, ['for-main']);
             diagnostics.tables.chests = {
               exists: true,
               count: parseInt(chestsCheck.rows[0].count),

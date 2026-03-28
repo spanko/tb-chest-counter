@@ -1,6 +1,6 @@
 # Setup custom domain for TB Chest Counter Dashboard
 param(
-    [string]$CustomDomain = "tb-dashboard.yourdomain.com",  # Change this to your domain
+    [string]$CustomDomain = "tb-dashboard.tbchestsforfor.com",  # Change this to your domain
     [string]$ResourceGroup = "rg-tb-chest-counter-dev",
     [string]$AppName = "tbdash-for-dev"
 )

@@ -86,8 +86,9 @@ class Storage:
     def store_chest(self, run_id: int, gift: dict) -> bool:
         player = gift["player_name"]
         chest_type = gift["chest_type"]
+        time_left = gift.get("time_left", "")
         confidence = gift.get("confidence", 1.0)
-        dedup_hash = self._dedup_hash(player, chest_type)
+        dedup_hash = self._dedup_hash(player, chest_type, time_left, run_id)
 
         with self.conn.cursor() as cur:
             cur.execute(
@@ -125,10 +126,9 @@ class Storage:
         log.debug(f"Stored: {player} / {chest_type} ({points} pts)")
         return True
 
-    def _dedup_hash(self, player_name: str, chest_type: str) -> str:
-        now = datetime.now(timezone.utc)
-        bucket = now.strftime("%Y%m%d%H")
-        raw = f"{self.clan_id}|{player_name}|{chest_type}|{bucket}"
+    def _dedup_hash(self, player_name: str, chest_type: str, time_left: str, run_id: int) -> str:
+        # time_left is unique per chest (e.g. "23 hr 45 min") - makes each chest distinguishable
+        raw = f"{self.clan_id}|{player_name}|{chest_type}|{time_left}|run_{run_id}"
         return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
     def _lookup_points(self, chest_type: str) -> int:
