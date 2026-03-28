@@ -112,14 +112,24 @@ async def run_chest_scan(config: dict):
                     pass
 
                 # Click the Open button
+                log.info(f"Clicking Open button at ({click_x}, {click_y})...")
                 await browser.page.mouse.click(click_x, click_y)
 
                 # Brief pause for animation (the open is instant, but give UI time)
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(1.0)  # Increased from 0.3 to allow animation
 
                 # Screenshot and extract contents
                 png = await browser.page.screenshot()
                 b64 = base64.b64encode(png).decode()
+
+                # Save debug screenshot after click
+                debug_after = Path("/tmp/screenshots") / f"after_click_{i}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                with open(debug_after, "wb") as f:
+                    f.write(base64.b64decode(b64))
+                log.info(f"After-click screenshot: {debug_after}")
+                # Upload to blob for debugging
+                upload_screenshot(str(debug_after), f"debug/after_click_{i}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
+
                 del png  # Explicit release
 
                 result = await read_opened_chest(b64, config)
