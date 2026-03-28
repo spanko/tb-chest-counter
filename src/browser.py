@@ -480,6 +480,118 @@ class TBBrowser:
 
         log.info("Modal popup check complete.")
 
+    async def dismiss_all_popups(self, wait_after_clear: int = 20, max_iterations: int = 10):
+        """Generalized popup dismissal loop using Vision.
+
+        Keeps checking for blockers and dismissing them until none remain,
+        then waits to ensure no new popups appear.
+
+        Args:
+            wait_after_clear: Seconds to wait after clearing popups (default 20)
+            max_iterations: Max popup dismiss attempts to prevent infinite loops
+        """
+        import base64
+        from vision import detect_popup_blocker
+
+        log.info(f"=== Starting generalized popup dismissal (max {max_iterations} iterations) ===")
+
+        iteration = 0
+        popups_dismissed = 0
+
+        while iteration < max_iterations:
+            iteration += 1
+            log.info(f"--- Popup check iteration {iteration}/{max_iterations} ---")
+
+            # Take screenshot
+            try:
+                png = await self.page.screenshot()
+                b64 = base64.b64encode(png).decode()
+                del png
+            except Exception as e:
+                log.error(f"Screenshot failed: {e}")
+                break
+
+            # Ask Vision if there's a blocker
+            result = await detect_popup_blocker(b64, self.config)
+            del b64
+
+            if not result.has_blocker:
+                log.info(f"No blocker detected: {result.description}")
+
+                if popups_dismissed > 0:
+                    # We dismissed at least one popup, wait to see if more appear
+                    log.info(f"Waiting {wait_after_clear}s to check for new popups...")
+                    await asyncio.sleep(wait_after_clear)
+
+                    # Check one more time after waiting
+                    try:
+                        png = await self.page.screenshot()
+                        b64 = base64.b64encode(png).decode()
+                        del png
+                        final_check = await detect_popup_blocker(b64, self.config)
+                        del b64
+
+                        if final_check.has_blocker:
+                            log.info(f"New popup appeared after wait: {final_check.description}")
+                            # Continue the loop to dismiss it
+                            result = final_check
+                        else:
+                            log.info("No new popups after wait. All clear!")
+                            break
+                    except Exception as e:
+                        log.warning(f"Final check failed: {e}")
+                        break
+                else:
+                    log.info("No popups to dismiss. Screen is clear.")
+                    break
+
+            if result.has_blocker:
+                log.info(f"Blocker found: {result.description}")
+                log.info(f"Close method: {result.close_method} at ({result.x}, {result.y})")
+
+                # Execute the close action
+                try:
+                    if result.close_method == "x_button" and result.x > 0 and result.y > 0:
+                        log.info(f"Clicking X button at ({result.x}, {result.y})...")
+                        await self.page.mouse.click(result.x, result.y)
+                        await asyncio.sleep(1)
+                        popups_dismissed += 1
+
+                    elif result.close_method == "click_outside":
+                        log.info(f"Clicking outside at ({result.x}, {result.y})...")
+                        await self.page.mouse.click(result.x, result.y)
+                        await asyncio.sleep(0.5)
+                        # Also try the opposite margin
+                        opposite_x = 1230 if result.x < 640 else 50
+                        await self.page.mouse.click(opposite_x, 400)
+                        await asyncio.sleep(0.5)
+                        popups_dismissed += 1
+
+                    elif result.close_method == "escape":
+                        log.info("Pressing Escape...")
+                        await self.page.keyboard.press("Escape")
+                        await asyncio.sleep(0.5)
+                        popups_dismissed += 1
+
+                    else:
+                        # Unknown method - try all approaches
+                        log.warning(f"Unknown close method '{result.close_method}' - trying all approaches")
+                        await self.page.keyboard.press("Escape")
+                        await asyncio.sleep(0.3)
+                        await self.page.mouse.click(50, 400)
+                        await asyncio.sleep(0.3)
+                        await self.page.mouse.click(1230, 400)
+                        await asyncio.sleep(0.3)
+                        popups_dismissed += 1
+
+                except Exception as e:
+                    log.error(f"Failed to execute close action: {e}")
+
+                # Brief pause before next iteration
+                await asyncio.sleep(1)
+
+        log.info(f"=== Popup dismissal complete: {popups_dismissed} popups dismissed in {iteration} iterations ===")
+
     async def _detect_popup_with_coordinates(self) -> dict:
         """Use Claude Vision to detect popups and locate the X button.
 
@@ -692,31 +804,30 @@ Return only valid JSON, no markdown."""
         log.info("Navigating to Clan → Gifts...")
 
         # Wait for game popups to appear (store popup loads after game)
-        log.info("Waiting for game popups to appear (20 seconds)...")
+        log.info("Waiting for game to fully load (20 seconds)...")
         await asyncio.sleep(20)
 
-        # Close Bonus Sales store if it's open
-        log.info("Closing any store overlays...")
-        await self._click_bonus_sales_x()
-        await asyncio.sleep(2)
+        # Use generalized popup dismissal - clears ALL blockers before navigating
+        log.info("Clearing all popups before navigation...")
+        await self.dismiss_all_popups(wait_after_clear=20, max_iterations=10)
 
-        # Dismiss any other popups with ESC
-        await self._dismiss_popups()
-        await asyncio.sleep(1)
-
+        # Click CLAN button
         clan_btn = self._get_coords("main_game", "bottom_nav_clan")
         log.info(f"Clicking CLAN at ({clan_btn['x']}, {clan_btn['y']})")
         await self.page.mouse.click(clan_btn["x"], clan_btn["y"])
         await asyncio.sleep(4)
 
+        # Clear any popups that appeared after clicking CLAN
+        await self.dismiss_all_popups(wait_after_clear=10, max_iterations=5)
+
+        # Click Gifts tab
         gifts_btn = self._get_coords("clan_panel", "sidebar_gifts")
         log.info(f"Clicking Gifts at ({gifts_btn['x']}, {gifts_btn['y']})")
         await self.page.mouse.click(gifts_btn["x"], gifts_btn["y"])
         await asyncio.sleep(3)
 
-        # Dismiss any modal popups that appeared after navigation
-        await self._dismiss_modal_popups()
-        await asyncio.sleep(2)  # Wait for popup animation to fully clear
+        # Final popup check after reaching Gifts tab
+        await self.dismiss_all_popups(wait_after_clear=10, max_iterations=5)
 
         log.info("Gifts tab navigation complete.")
 

@@ -175,6 +175,120 @@ async def find_first_gift(b64_image: str, config: dict) -> FirstGiftResult:
         return FirstGiftResult(done=True, player_name="", chest_type="", open_button_x=770, open_button_y=0)
 
 
+@dataclass
+class PopupDetectionResult:
+    """Result from detect_popup_blocker()."""
+    has_blocker: bool  # True if something is blocking the Gifts tab
+    description: str  # What the blocker is
+    close_method: str  # "x_button", "click_outside", "escape", or "none"
+    x: int  # X coordinate if close_method is "x_button"
+    y: int  # Y coordinate if close_method is "x_button"
+
+
+POPUP_DETECTION_PROMPT = """You are looking at a Total Battle game screenshot at 1280x720.
+
+We are trying to reach the Gifts tab to open chests. Check if ANYTHING is blocking access to the Gifts tab.
+
+BLOCKERS that need to be closed:
+- Store overlays (Bonus Sales, Special Offers, item shops with prices)
+- Proposal/offer dialogs ("A proposal from...")
+- Payment dialogs with USD prices
+- Help panels or tutorials
+- Any centered popup or modal dialog
+- Achievement notifications
+- Event banners that cover the screen
+- The "Great Archaeologist" or similar informational popups
+
+NOT BLOCKERS (these are OK):
+- The Clan panel showing the Gifts tab with rows of chests
+- A list of chests showing player names and "Open" buttons
+- Normal game UI (bottom navigation, resources bar)
+
+If there IS a blocker, determine how to close it:
+1. Look for an X button on the popup - provide exact pixel coordinates
+2. If no X button, suggest clicking outside the dialog (dark margins)
+3. If it looks like a simple notification, ESC might work
+
+Return JSON only (no markdown):
+{
+  "has_blocker": true,
+  "description": "Bonus Sales store showing items for sale",
+  "close_method": "x_button",
+  "x": 875,
+  "y": 52
+}
+
+For click_outside:
+{
+  "has_blocker": true,
+  "description": "Payment dialog",
+  "close_method": "click_outside",
+  "x": 50,
+  "y": 400
+}
+
+For escape:
+{
+  "has_blocker": true,
+  "description": "Small notification popup",
+  "close_method": "escape",
+  "x": 0,
+  "y": 0
+}
+
+If no blocker:
+{
+  "has_blocker": false,
+  "description": "Clan Gifts tab visible with chest rows",
+  "close_method": "none",
+  "x": 0,
+  "y": 0
+}
+
+Return only valid JSON."""
+
+
+async def detect_popup_blocker(b64_image: str, config: dict) -> PopupDetectionResult:
+    """Detect if anything is blocking access to the Gifts tab.
+
+    Uses Vision to identify popups/overlays and determine how to close them.
+
+    Args:
+        b64_image: Base64-encoded PNG screenshot
+        config: Config dict with vision settings
+
+    Returns:
+        PopupDetectionResult with blocker info and close instructions
+    """
+    try:
+        data = _call_claude(b64_image, POPUP_DETECTION_PROMPT, config)
+
+        result = PopupDetectionResult(
+            has_blocker=data.get("has_blocker", False),
+            description=data.get("description", ""),
+            close_method=data.get("close_method", "none"),
+            x=data.get("x", 0),
+            y=data.get("y", 0),
+        )
+
+        if result.has_blocker:
+            log.info(f"detect_popup_blocker: Found '{result.description}' — close via {result.close_method} at ({result.x}, {result.y})")
+        else:
+            log.info(f"detect_popup_blocker: No blocker — {result.description}")
+
+        return result
+
+    except (json.JSONDecodeError, KeyError) as e:
+        log.error(f"detect_popup_blocker: Failed to parse response: {e}")
+        return PopupDetectionResult(
+            has_blocker=False,
+            description=f"parse error: {e}",
+            close_method="none",
+            x=0,
+            y=0
+        )
+
+
 async def read_opened_chest(b64_image: str, config: dict) -> OpenedChestResult:
     """Read the contents of a just-opened chest.
 
