@@ -68,25 +68,31 @@ If you see gift rows with chests, return done=false and provide BOTH x and y coo
 
 Return only valid JSON, no markdown."""
 
-READ_CHEST_PROMPT = """A chest in Total Battle was just clicked open. Analyze the screen.
+READ_CHEST_PROMPT = """A chest in Total Battle was just clicked. Analyze the screen at 1280x720.
 
-Two possible states:
-1. A chest opened showing its contents (items, resources, troops, gold, etc.)
-2. The gift list is empty — no more gifts to open
+Three possible states:
+1. A chest OPENED showing its contents in a popup/dialog (items, resources, troops, gold)
+2. The gift list is EMPTY — no more gifts to open (done=true)
+3. The gift list is still showing with chests to open — the click missed (done=false, return empty items)
 
-Return JSON only:
+IMPORTANT: If you see the gift list with chest rows and "Open" buttons visible, the click did NOT work.
+Return done=false with empty items so we can retry.
+
+If a chest popup IS showing with contents:
 {
   "done": false,
-  "player_name": "...",
-  "chest_type": "...",
+  "player_name": "PlayerName",
+  "chest_type": "Forgotten Chest",
   "items": [
     {"item": "Gold", "quantity": 500000},
-    {"item": "Wood", "quantity": 200},
-    {"item": "Swordsmen", "quantity": 50}
+    {"item": "Wood", "quantity": 200}
   ]
 }
 
-If no chest opened (empty list, nothing happened, error screen):
+If the gift list is still visible (click missed, need retry):
+{"done": false, "player_name": "", "chest_type": "", "items": []}
+
+If no gifts remain (empty list, "No gifts" message):
 {"done": true, "player_name": "", "chest_type": "", "items": []}
 
 Return only valid JSON, no markdown."""

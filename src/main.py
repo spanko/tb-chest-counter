@@ -138,6 +138,23 @@ async def run_chest_scan(config: dict):
                     log.info(f"No more gifts after {i} opened.")
                     break
 
+                # Check if click missed (empty items means gift list still showing)
+                if not result.items:
+                    log.warning(f"Click missed - no chest opened. Re-detecting Open button...")
+                    # Re-detect the Open button position
+                    png = await browser.page.screenshot()
+                    b64 = base64.b64encode(png).decode()
+                    del png
+                    retry_first = await find_first_gift(b64, config)
+                    del b64
+                    if retry_first.done:
+                        log.info("No more gifts found on retry.")
+                        break
+                    click_x = retry_first.open_button_x
+                    click_y = retry_first.open_button_y
+                    log.info(f"Re-detected Open button at ({click_x}, {click_y})")
+                    continue  # Retry the click with new coordinates
+
                 # Store the gift
                 run_gifts.append({
                     "player_name": result.player_name,
