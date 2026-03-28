@@ -619,9 +619,19 @@ class TBBrowser:
 
         # Always try ESC as final fallback
         log.info("Pressing ESC to ensure popups closed...")
-        for _ in range(3):
+        for _ in range(5):
             await self.page.keyboard.press("Escape")
             await asyncio.sleep(0.3)
+
+        # Click in the game area (bottom center) to dismiss any remaining overlays
+        log.info("Clicking game area to dismiss store...")
+        await self.page.mouse.click(640, 680)  # Bottom center near game UI
+        await asyncio.sleep(1)
+
+        # More ESC presses after click
+        for _ in range(3):
+            await self.page.keyboard.press("Escape")
+            await asyncio.sleep(0.2)
 
         log.info("Bonus Sales close complete.")
 
