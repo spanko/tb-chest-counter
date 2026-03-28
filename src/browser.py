@@ -597,18 +597,31 @@ class TBBrowser:
             if x_info.get("has_store") and x_info.get("x_coords"):
                 x, y = x_info["x_coords"]["x"], x_info["x_coords"]["y"]
                 log.info(f"Vision found store X button at ({x}, {y})")
+
+                # Click the detected X button
                 await self.page.mouse.click(x, y)
                 await asyncio.sleep(1)
                 log.info("Clicked store X button.")
+
+                # Also try clicking outside the panel (dark areas) to dismiss
+                log.info("Clicking outside panel to ensure dismissal...")
+                await self.page.mouse.click(50, 400)  # Left margin
+                await asyncio.sleep(0.5)
+
+                # And ESC as backup
+                await self.page.keyboard.press("Escape")
+                await asyncio.sleep(0.5)
             else:
                 log.info("No store overlay detected by Vision.")
 
         except Exception as e:
             log.warning(f"Vision-based store close failed: {e}")
-            # Fallback: try ESC key
-            log.info("Falling back to ESC key...")
+
+        # Always try ESC as final fallback
+        log.info("Pressing ESC to ensure popups closed...")
+        for _ in range(3):
             await self.page.keyboard.press("Escape")
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.3)
 
         log.info("Bonus Sales close complete.")
 
