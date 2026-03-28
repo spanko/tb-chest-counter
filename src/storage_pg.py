@@ -33,7 +33,6 @@ class Storage:
         self.conn.autocommit = False
         log.info(f"Connected to PostgreSQL: {db['host']}/{db['database']}")
 
-        self._dedup_window = config.get("chest_counter", {}).get("dedup_window_minutes", 60)
         self._ensure_clan()
 
     def _ensure_clan(self):
@@ -84,24 +83,10 @@ class Storage:
         self.conn.commit()
 
     def store_chest(self, run_id: int, gift: dict) -> bool:
+        """Store a chest directly - no deduplication."""
         player = gift["player_name"]
         chest_type = gift["chest_type"]
-        time_left = gift.get("time_left", "")
         confidence = gift.get("confidence", 1.0)
-        dedup_hash = self._dedup_hash(player, chest_type, time_left, run_id)
-
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """SELECT id FROM chests
-                   WHERE clan_id = %s AND dedup_hash = %s
-                     AND scanned_at > NOW() - INTERVAL '%s minutes'
-                   LIMIT 1""",
-                (self.clan_id, dedup_hash, self._dedup_window),
-            )
-            if cur.fetchone():
-                log.debug(f"Duplicate: {player} / {chest_type}")
-                return False
-
         points = self._lookup_points(chest_type)
 
         with self.conn.cursor() as cur:
@@ -109,9 +94,8 @@ class Storage:
                 """INSERT INTO chests
                    (clan_id, run_id, player_name, player_name_raw, chest_type,
                     chest_type_raw, source, points, confidence, verified,
-                    time_remaining, screenshot_ref, dedup_hash)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                   ON CONFLICT (clan_id, dedup_hash) DO NOTHING""",
+                    time_remaining, screenshot_ref)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     self.clan_id, run_id, player,
                     gift.get("player_name_raw", player),
@@ -119,17 +103,12 @@ class Storage:
                     gift.get("source"), points, confidence,
                     gift.get("verified", False),
                     gift.get("time_left") or gift.get("time_remaining") or gift.get("time_ago"),
-                    gift.get("screenshot_ref"), dedup_hash,
+                    gift.get("screenshot_ref"),
                 ),
             )
         self.conn.commit()
         log.debug(f"Stored: {player} / {chest_type} ({points} pts)")
         return True
-
-    def _dedup_hash(self, player_name: str, chest_type: str, time_left: str, run_id: int) -> str:
-        # time_left is unique per chest (e.g. "23 hr 45 min") - makes each chest distinguishable
-        raw = f"{self.clan_id}|{player_name}|{chest_type}|{time_left}|run_{run_id}"
-        return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
     def _lookup_points(self, chest_type: str) -> int:
         with self.conn.cursor() as cur:
