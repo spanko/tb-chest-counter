@@ -45,19 +45,25 @@ class OpenedChestResult:
 
 FIND_FIRST_PROMPT = """You are looking at the Total Battle Clan Gifts tab at 1280x720.
 
-The gift list shows rows, each with a green "Open" button on the right side (~x=995).
-Find the FIRST (topmost) gift row that has an Open button.
+The gift list shows rows of chests sent by clan members. Each row shows:
+- A chest icon on the left
+- Player name and chest type (e.g. "Forgotten Chest", "Sapphire Chest", "Barbarian Chest")
+- A button on the right side to claim/open the chest
+
+Find the FIRST (topmost) gift row that has a claimable chest with a button.
 
 Return JSON only:
 {
   "done": false,
-  "player_name": "...",
-  "chest_type": "...",
-  "open_button_y": 350
+  "player_name": "PlayerName",
+  "chest_type": "Forgotten Chest",
+  "open_button_y": 230
 }
 
-Set done=true if there are no gift rows with Open buttons visible.
-open_button_y should be the pixel y-coordinate of the center of the first Open button.
+Set done=true ONLY if there are NO gift rows visible at all (empty list).
+If you see gift rows with chests, return done=false and provide the y-coordinate of the first row's button.
+The button is on the right side of the row, around x=750-800.
+
 Return only valid JSON, no markdown."""
 
 READ_CHEST_PROMPT = """A chest in Total Battle was just clicked open. Analyze the screen.
