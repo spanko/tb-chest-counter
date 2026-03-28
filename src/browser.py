@@ -667,12 +667,16 @@ Return only valid JSON, no markdown."""
         """Navigate to Clan → Gifts tab using calibrated coordinates."""
         log.info("Navigating to Clan → Gifts...")
 
-        # Close Bonus Sales store if it's open (clicks X at top-right)
+        # Wait for game popups to appear (store popup loads after game)
+        log.info("Waiting for game popups to appear (20 seconds)...")
+        await asyncio.sleep(20)
+
+        # Close Bonus Sales store if it's open
         log.info("Closing any store overlays...")
         await self._click_bonus_sales_x()
         await asyncio.sleep(2)
 
-        # Dismiss any other popups
+        # Dismiss any other popups with ESC
         await self._dismiss_popups()
         await asyncio.sleep(1)
 
@@ -680,11 +684,6 @@ Return only valid JSON, no markdown."""
         log.info(f"Clicking CLAN at ({clan_btn['x']}, {clan_btn['y']})")
         await self.page.mouse.click(clan_btn["x"], clan_btn["y"])
         await asyncio.sleep(4)
-
-        # Store popup often appears after clicking CLAN - close it
-        log.info("Checking for store popup after CLAN click...")
-        await self._click_bonus_sales_x()
-        await asyncio.sleep(1)
 
         gifts_btn = self._get_coords("clan_panel", "sidebar_gifts")
         log.info(f"Clicking Gifts at ({gifts_btn['x']}, {gifts_btn['y']})")
