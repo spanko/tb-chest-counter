@@ -618,13 +618,15 @@ class TBBrowser:
 
         prompt = """Look at this Total Battle game screenshot at 1280x720 resolution.
 
-Is there a store/shop overlay panel visible? If yes, find the X (close) button on that panel.
+Is there a store/shop overlay panel visible in the CENTER of the screen? This is a popup panel showing items for sale (like "Rise of the Ancients Special" or "Bonus Sales").
+
+If yes, find the X (close) button. The X is on the PANEL ITSELF - look for a small X in the top-right corner OF THE PANEL (not the browser window edge). The panel is centered, so the X should be around x=870-890, not at x=1250+.
 
 Return JSON only:
 {
   "has_store": true,
-  "x_coords": {"x": 870, "y": 65},
-  "description": "Bonus Sales store panel with X button in top-right of panel"
+  "x_coords": {"x": 875, "y": 52},
+  "description": "Store panel X button in top-right of centered panel"
 }
 
 If no store overlay is visible:
