@@ -573,6 +573,16 @@ class TBBrowser:
                         await asyncio.sleep(0.5)
                         popups_dismissed += 1
 
+                    elif result.close_method == "navigate":
+                        # Special case: we're on the wrong screen (e.g., main city view)
+                        # This shouldn't happen during popup dismissal, but if it does,
+                        # try pressing Escape to clear any hidden overlays
+                        log.warning(f"Wrong screen detected: {result.description}")
+                        await self.page.keyboard.press("Escape")
+                        await asyncio.sleep(0.5)
+                        # Don't count as dismissed - let caller handle navigation
+                        break
+
                     else:
                         # Unknown method - try all approaches
                         log.warning(f"Unknown close method '{result.close_method}' - trying all approaches")
@@ -799,37 +809,79 @@ Return only valid JSON, no markdown."""
     # ── Navigation (calibration-based) ──────────────────────────────────
 
 
-    async def navigate_to_gifts(self):
-        """Navigate to Clan → Gifts tab using calibrated coordinates."""
-        log.info("Navigating to Clan → Gifts...")
+    async def navigate_to_gifts(self, max_retries: int = 3):
+        """Navigate to Clan → Gifts tab using calibrated coordinates.
 
-        # Wait for game popups to appear (store popup loads after game)
-        log.info("Waiting for game to fully load (20 seconds)...")
-        await asyncio.sleep(20)
+        Args:
+            max_retries: Number of times to retry navigation if verification fails
+        """
+        import base64
+        from vision import detect_popup_blocker
 
-        # Use generalized popup dismissal - clears ALL blockers before navigating
-        log.info("Clearing all popups before navigation...")
-        await self.dismiss_all_popups(wait_after_clear=20, max_iterations=10)
+        for attempt in range(1, max_retries + 1):
+            log.info(f"=== Navigation attempt {attempt}/{max_retries} ===")
+            log.info("Navigating to Clan → Gifts...")
 
-        # Click CLAN button
-        clan_btn = self._get_coords("main_game", "bottom_nav_clan")
-        log.info(f"Clicking CLAN at ({clan_btn['x']}, {clan_btn['y']})")
-        await self.page.mouse.click(clan_btn["x"], clan_btn["y"])
-        await asyncio.sleep(4)
+            # Wait for game popups to appear (store popup loads after game)
+            if attempt == 1:
+                log.info("Waiting for game to fully load (20 seconds)...")
+                await asyncio.sleep(20)
 
-        # Clear any popups that appeared after clicking CLAN
-        await self.dismiss_all_popups(wait_after_clear=10, max_iterations=5)
+            # Use generalized popup dismissal - clears ALL blockers before navigating
+            log.info("Clearing all popups before navigation...")
+            await self.dismiss_all_popups(wait_after_clear=15, max_iterations=10)
 
-        # Click Gifts tab
-        gifts_btn = self._get_coords("clan_panel", "sidebar_gifts")
-        log.info(f"Clicking Gifts at ({gifts_btn['x']}, {gifts_btn['y']})")
-        await self.page.mouse.click(gifts_btn["x"], gifts_btn["y"])
-        await asyncio.sleep(3)
+            # Click CLAN button
+            clan_btn = self._get_coords("main_game", "bottom_nav_clan")
+            log.info(f"Clicking CLAN at ({clan_btn['x']}, {clan_btn['y']})")
+            await self.page.mouse.click(clan_btn["x"], clan_btn["y"])
+            await asyncio.sleep(4)
 
-        # Final popup check after reaching Gifts tab
-        await self.dismiss_all_popups(wait_after_clear=10, max_iterations=5)
+            # Clear any popups that appeared after clicking CLAN
+            await self.dismiss_all_popups(wait_after_clear=5, max_iterations=5)
 
-        log.info("Gifts tab navigation complete.")
+            # Click Gifts tab
+            gifts_btn = self._get_coords("clan_panel", "sidebar_gifts")
+            log.info(f"Clicking Gifts at ({gifts_btn['x']}, {gifts_btn['y']})")
+            await self.page.mouse.click(gifts_btn["x"], gifts_btn["y"])
+            await asyncio.sleep(3)
+
+            # Final popup check after reaching Gifts tab
+            await self.dismiss_all_popups(wait_after_clear=5, max_iterations=5)
+
+            # Verify we're actually on the Gifts tab
+            log.info("Verifying navigation succeeded...")
+            try:
+                png = await self.page.screenshot()
+                b64 = base64.b64encode(png).decode()
+                del png
+
+                result = await detect_popup_blocker(b64, self.config)
+                del b64
+
+                if not result.has_blocker:
+                    log.info("Navigation verified - Gifts tab visible!")
+                    return  # Success!
+                elif "city view" in result.description.lower() or "main" in result.description.lower():
+                    log.warning(f"Navigation failed - still on main view: {result.description}")
+                    # Try clicking away any invisible overlay and retry
+                    await self.page.keyboard.press("Escape")
+                    await asyncio.sleep(1)
+                else:
+                    log.warning(f"Blocker still present: {result.description}")
+                    # Try to dismiss it
+                    if result.close_method == "x_button" and result.x > 0:
+                        await self.page.mouse.click(result.x, result.y)
+                        await asyncio.sleep(1)
+
+            except Exception as e:
+                log.error(f"Verification failed: {e}")
+
+            if attempt < max_retries:
+                log.info(f"Retrying navigation...")
+                await asyncio.sleep(2)
+
+        log.warning("Navigation verification failed after all retries - proceeding anyway")
 
 
 

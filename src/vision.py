@@ -286,54 +286,56 @@ class PopupDetectionResult:
 
 POPUP_DETECTION_PROMPT = """You are looking at a Total Battle game screenshot at 1280x720.
 
-Look for any POPUP or OVERLAY blocking the main game view. A popup is:
-- A rectangular panel/dialog floating IN FRONT of the game
-- Usually centered or prominent on screen
-- Has an X (close) button in its upper-right corner
-- May have a darker/dimmed background behind it
+Look for any POPUP, OVERLAY, or STORE PANEL blocking the main game view.
 
-Common popup types that MUST be closed:
-- Store/shop panels (Bonus Sales, Special Offers, item shops with prices)
-- Info panels ("Great Archaeologist", tutorials, help screens)
-- Proposal/offer dialogs ("A proposal from...")
-- Payment dialogs with USD prices
-- Achievement/reward notifications
-- Event banners or announcements
+CRITICAL BLOCKERS TO DETECT:
+1. STORE/SHOP PANELS - Full-screen or large panels with:
+   - "BONUS SALES", "CRYPT CHESTS SALE", "RAPID MARCHES" headers
+   - Grid of items with USD prices ($4.99, $9.99, etc.)
+   - Left sidebar with categories (Featured, Battles, Resources, Extra, Materials, Enchantments)
+   - X button usually in TOP-LEFT corner (around x=45, y=45)
 
-CRITICAL: The X button is ALWAYS in the upper-right corner OF THE POPUP PANEL ITSELF.
-This is NOT the screen edge - look 20-40 pixels inside from the panel's top-right corner.
-The X is usually a small icon or button within the popup's border.
+2. INFO POPUPS - Centered dialogs with:
+   - "Great Archaeologist", tutorials, help screens
+   - X button in upper-right corner of the popup panel
 
-What is NOT a popup (do NOT report as blocker):
-- The Clan panel on the left side with Gifts/Members tabs
-- The gift list showing player names and "Open" buttons
+3. PROPOSAL/OFFER DIALOGS - "A proposal from..." messages
+
+4. EVENT BANNERS - Achievement notifications, event announcements
+
+IMPORTANT: Store panels have the X button in the TOP-LEFT corner, not top-right!
+Look for a small X icon around coordinates (45, 45) for store panels.
+
+What is NOT a blocker (ignore these):
+- The Clan panel on the left with Gifts/Members tabs
+- Gift list showing player names and "Open" buttons
 - Bottom navigation bar
-- Top resource bar
-- Normal game UI elements
+- Top resource bar with gold/food/etc
+- Main city/base view (this means navigation hasn't happened yet)
 
-If you find a popup:
-1. Identify the X button in its upper-right corner
-2. Return the EXACT pixel coordinates of the X button center
+If you see the MAIN CITY VIEW (buildings, troops, no clan panel):
+- Return has_blocker=true, description="Main city view - not on Gifts tab"
+- Use close_method="navigate" (special case - needs retry)
 
-Return JSON only (no markdown):
+Return JSON only:
 {
   "has_blocker": true,
-  "description": "Great Archaeologist info panel",
+  "description": "Bonus Sales store panel",
+  "close_method": "x_button",
+  "x": 45,
+  "y": 45
+}
+
+For popups with X in upper-right:
+{
+  "has_blocker": true,
+  "description": "Info panel",
   "close_method": "x_button",
   "x": 875,
   "y": 95
 }
 
-If no X visible, click outside the popup:
-{
-  "has_blocker": true,
-  "description": "Payment dialog without clear X",
-  "close_method": "click_outside",
-  "x": 50,
-  "y": 400
-}
-
-If no popup found:
+If no popup and Gifts tab IS visible with chest rows:
 {
   "has_blocker": false,
   "description": "Clan Gifts tab visible with chest rows",
@@ -342,7 +344,7 @@ If no popup found:
   "y": 0
 }
 
-Return only valid JSON."""
+Return only valid JSON, no markdown."""
 
 
 async def detect_popup_blocker(b64_image: str, config: dict) -> PopupDetectionResult:
