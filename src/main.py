@@ -74,13 +74,19 @@ async def run_chest_scan(config: dict):
             log.info("Finding first Open button...")
             png = await browser.page.screenshot()
             b64 = base64.b64encode(png).decode()
-            del png  # Explicit release
+
+            # Save debug screenshot before Vision call
+            debug_path = Path("/tmp/screenshots") / f"find_first_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            debug_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(debug_path, "wb") as f:
+                f.write(base64.b64decode(b64))
+            log.info(f"Debug screenshot saved: {debug_path}")
 
             first = await find_first_gift(b64, config)
-            del b64  # Explicit release
+            del png, b64  # Explicit release
 
             if first.done:
-                log.info("No gifts to claim.")
+                log.warning(f"Vision returned done=true. Debug screenshot at: {debug_path}")
                 storage.complete_run(run_id, 0, 0, 0)
                 return
 

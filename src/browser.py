@@ -639,7 +639,7 @@ class TBBrowser:
 
         # Dismiss any modal popups that appeared after navigation
         await self._dismiss_modal_popups()
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)  # Wait for popup animation to fully clear
 
         log.info("Gifts tab navigation complete.")
 
