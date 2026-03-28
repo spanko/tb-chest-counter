@@ -27,6 +27,22 @@ class FirstGiftResult:
 
 
 @dataclass
+class GiftInfo:
+    """Info about a single gift in the list."""
+    player_name: str
+    chest_type: str
+    open_button_y: int  # Y coordinate of the Open button
+
+
+@dataclass
+class AllGiftsResult:
+    """Result from find_all_visible_gifts()."""
+    done: bool  # True if no gifts visible
+    open_button_x: int  # X coordinate (same for all buttons)
+    gifts: list[GiftInfo]  # List of visible gifts, top to bottom
+
+
+@dataclass
 class ChestItem:
     """A single item from an opened chest."""
     item: str
@@ -43,6 +59,35 @@ class OpenedChestResult:
 
 
 # ── Prompts ────────────────────────────────────────────────────────────────
+
+FIND_ALL_GIFTS_PROMPT = """You are looking at the Total Battle Clan Gifts tab at 1280x720.
+
+The gift list shows rows of chests sent by clan members. Each row shows:
+- A chest icon on the left
+- Player name and chest type (e.g. "Forgotten Chest", "Sapphire Chest", "Barbarian Chest")
+- An "Open" button on the right side
+
+List ALL visible gift rows from TOP to BOTTOM. For each gift, provide:
+- player_name: The player who sent it
+- chest_type: The type of chest (e.g. "Orc Chest", "Sand Chest", "Elegant Chest")
+- open_button_y: The Y pixel coordinate of that row's Open button
+
+The Open buttons are all at the same X coordinate (around 770).
+
+Return JSON only:
+{
+  "done": false,
+  "open_button_x": 770,
+  "gifts": [
+    {"player_name": "Player1", "chest_type": "Orc Chest", "open_button_y": 195},
+    {"player_name": "Player2", "chest_type": "Sand Chest", "open_button_y": 255},
+    {"player_name": "Player3", "chest_type": "Elegant Chest", "open_button_y": 315},
+    {"player_name": "Player4", "chest_type": "Forgotten Chest", "open_button_y": 375}
+  ]
+}
+
+Set done=true ONLY if there are NO gift rows visible at all (empty list).
+Return only valid JSON, no markdown."""
 
 FIND_FIRST_PROMPT = """You are looking at the Total Battle Clan Gifts tab at 1280x720.
 
@@ -144,6 +189,50 @@ def _call_claude(b64_image: str, prompt: str, config: dict) -> dict:
     text = text.strip()
 
     return json.loads(text)
+
+
+async def find_all_visible_gifts(b64_image: str, config: dict) -> AllGiftsResult:
+    """Find ALL visible gifts in the gift list.
+
+    Returns all visible gifts so we can click through them in batch
+    before taking another screenshot.
+
+    Args:
+        b64_image: Base64-encoded PNG screenshot
+        config: Config dict with vision settings
+
+    Returns:
+        AllGiftsResult with list of all visible gifts
+    """
+    try:
+        data = _call_claude(b64_image, FIND_ALL_GIFTS_PROMPT, config)
+
+        gifts = []
+        for gift_data in data.get("gifts", []):
+            gifts.append(GiftInfo(
+                player_name=gift_data.get("player_name", ""),
+                chest_type=gift_data.get("chest_type", ""),
+                open_button_y=gift_data.get("open_button_y", 0),
+            ))
+
+        result = AllGiftsResult(
+            done=data.get("done", False),
+            open_button_x=data.get("open_button_x", 770),
+            gifts=gifts,
+        )
+
+        if result.done:
+            log.info("find_all_visible_gifts: No gifts to claim")
+        else:
+            log.info(f"find_all_visible_gifts: Found {len(result.gifts)} gifts")
+            for g in result.gifts:
+                log.info(f"  - {g.player_name}: {g.chest_type} at y={g.open_button_y}")
+
+        return result
+
+    except (json.JSONDecodeError, KeyError) as e:
+        log.error(f"find_all_visible_gifts: Failed to parse response: {e}")
+        return AllGiftsResult(done=True, open_button_x=770, gifts=[])
 
 
 async def find_first_gift(b64_image: str, config: dict) -> FirstGiftResult:

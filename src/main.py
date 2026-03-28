@@ -48,9 +48,13 @@ def setup_logging(verbose: bool = False):
 
 
 async def run_chest_scan(config: dict):
-    """Execute a single chest scan cycle using the simplified vision-native loop."""
+    """Execute a single chest scan cycle using batch Vision calls.
+
+    Optimization: Get ALL visible gifts in one Vision call, click through them all,
+    then take another screenshot. This reduces Vision calls by ~4x.
+    """
     from browser import TBBrowser
-    from vision import find_first_gift
+    from vision import find_all_visible_gifts
 
     cloud_mode = config.get("_cloud_mode", False)
     headless = config.get("_headless", True)
@@ -64,87 +68,74 @@ async def run_chest_scan(config: dict):
     storage = Storage(config)
     run_id = storage.start_run("claude-haiku-4-5-20251001")
     run_gifts = []
+    total_opened = 0
 
     try:
         async with TBBrowser(config, headless=headless) as browser:
             await browser.login()
             await browser.navigate_to_gifts()
 
-            # Phase 1: find the first Open button (one-time)
-            log.info("Finding first Open button...")
-            png = await browser.page.screenshot()
-            b64 = base64.b64encode(png).decode()
-
-            # Save debug screenshot before Vision call
-            debug_path = Path("/tmp/screenshots") / f"find_first_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            debug_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(debug_path, "wb") as f:
-                f.write(base64.b64decode(b64))
-            log.info(f"Debug screenshot saved: {debug_path}")
-
-            first = await find_first_gift(b64, config)
-            del png, b64  # Explicit release
-
-            if first.done:
-                log.warning(f"Vision returned done=true. Debug screenshot at: {debug_path}")
-                # Upload to blob storage for investigation
-                upload_screenshot(str(debug_path), f"debug/no_gifts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
-                storage.complete_run(run_id, 0, 0, 0)
-                return
-
-            # Phase 2: Loop - detect gift, click, store, repeat
-            # We get player_name and chest_type from find_first_gift BEFORE clicking
             max_gifts = config.get("chest_counter", {}).get("max_gifts", 200)
-            current_gift = first  # Start with the first gift we already found
+            batch_num = 0
 
-            for i in range(max_gifts):
-                # We already have the gift info from find_first_gift
-                player_name = current_gift.player_name
-                chest_type = current_gift.chest_type
-                click_x = current_gift.open_button_x
-                click_y = current_gift.open_button_y
+            while total_opened < max_gifts:
+                batch_num += 1
+                log.info(f"=== Batch {batch_num}: Taking screenshot and finding all visible gifts ===")
 
-                log.info(f"[{i+1}] Opening {chest_type} from {player_name} at ({click_x}, {click_y})...")
-
-                # Click the Open button
-                await browser.page.mouse.click(click_x, click_y)
-
-                # Store the gift IMMEDIATELY (we already know player and chest type)
-                gift_data = {
-                    "player_name": player_name,
-                    "chest_type": chest_type,
-                    "contents": [],  # We don't capture contents anymore
-                    "opened_at": datetime.now(timezone.utc).isoformat(),
-                    "run_id": run_id,
-                }
-                storage.store_chest(run_id, gift_data)
-                run_gifts.append(gift_data)
-
-                log.info(f"[{i+1}] Stored: {player_name} — {chest_type}")
-
-                # Brief pause for UI to update
-                await asyncio.sleep(0.3)
-
-                # Take screenshot and find the NEXT gift
+                # Screenshot and get ALL visible gifts
                 png = await browser.page.screenshot()
                 b64 = base64.b64encode(png).decode()
+
+                # Save debug screenshot
+                debug_path = Path("/tmp/screenshots") / f"batch_{batch_num}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                debug_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(debug_path, "wb") as f:
+                    f.write(base64.b64decode(b64))
+                upload_screenshot(str(debug_path), f"debug/batch_{batch_num}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
+
                 del png
 
-                # Upload debug screenshot
-                debug_after = Path("/tmp/screenshots") / f"after_click_{i}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                with open(debug_after, "wb") as f:
-                    f.write(base64.b64decode(b64))
-                upload_screenshot(str(debug_after), f"debug/after_click_{i}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
-
-                # Find next gift
-                next_gift = await find_first_gift(b64, config)
+                # Get all visible gifts in one Vision call
+                result = await find_all_visible_gifts(b64, config)
                 del b64
 
-                if next_gift.done:
-                    log.info(f"No more gifts after {i+1} opened.")
+                if result.done or len(result.gifts) == 0:
+                    log.info(f"No more gifts found. Total opened: {total_opened}")
                     break
 
-                current_gift = next_gift
+                log.info(f"Found {len(result.gifts)} gifts in this batch")
+
+                # Click through ALL visible gifts rapidly
+                click_x = result.open_button_x
+                for gift in result.gifts:
+                    if total_opened >= max_gifts:
+                        log.info(f"Reached max_gifts limit ({max_gifts})")
+                        break
+
+                    total_opened += 1
+                    log.info(f"[{total_opened}] Opening {gift.chest_type} from {gift.player_name} at ({click_x}, {gift.open_button_y})...")
+
+                    # Click the Open button
+                    await browser.page.mouse.click(click_x, gift.open_button_y)
+
+                    # Store immediately
+                    gift_data = {
+                        "player_name": gift.player_name,
+                        "chest_type": gift.chest_type,
+                        "contents": [],
+                        "opened_at": datetime.now(timezone.utc).isoformat(),
+                        "run_id": run_id,
+                    }
+                    storage.store_chest(run_id, gift_data)
+                    run_gifts.append(gift_data)
+
+                    log.info(f"[{total_opened}] Stored: {gift.player_name} — {gift.chest_type}")
+
+                    # Brief pause between clicks
+                    await asyncio.sleep(0.3)
+
+                # After clicking all visible gifts, loop back to take new screenshot
+                log.info(f"Batch {batch_num} complete. Opened {len(result.gifts)} gifts this batch.")
 
     except Exception as e:
         log.error(f"Scan failed: {e}", exc_info=True)
