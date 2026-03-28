@@ -155,14 +155,17 @@ async def run_chest_scan(config: dict):
                     log.info(f"Re-detected Open button at ({click_x}, {click_y})")
                     continue  # Retry the click with new coordinates
 
-                # Store the gift
-                run_gifts.append({
+                # Store the gift IMMEDIATELY to database (in case of crash/timeout)
+                gift_data = {
                     "player_name": result.player_name,
                     "chest_type": result.chest_type,
                     "contents": [{"item": it.item, "quantity": it.quantity} for it in result.items],
                     "opened_at": datetime.now(timezone.utc).isoformat(),
                     "run_id": run_id,
-                })
+                }
+                storage.store_chest(run_id, gift_data)
+                run_gifts.append(gift_data)  # Keep track for final count
+
                 items_preview = ", ".join(f"{it.item}x{it.quantity}" for it in result.items[:3])
                 log.info(f"[{i+1}] {result.player_name} — {result.chest_type}: {items_preview}")
 
@@ -175,10 +178,8 @@ async def run_chest_scan(config: dict):
         storage.fail_run(run_id, str(e))
         raise
 
-    # Bulk insert all gifts
-    for gift in run_gifts:
-        storage.store_chest(run_id, gift)
-
+    # Chests are already stored immediately as they're opened
+    # Just update the run stats
     storage.complete_run(run_id, 1, len(run_gifts), len(run_gifts))
     log.info(f"Done. Stored {len(run_gifts)} gifts.")
     storage.close()
