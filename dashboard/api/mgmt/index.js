@@ -43,7 +43,7 @@ module.exports = async function (context, req) {
 
     switch (action) {
       case "status":
-        // Get recent runs from database
+        // Get recent runs from database (scan_runs is the actual table used by scanner)
         const runsQuery = `
           SELECT
             run_id,
@@ -51,16 +51,16 @@ module.exports = async function (context, req) {
             completed_at,
             status,
             pages_scanned,
-            gifts_found,
-            new_gifts,
+            chests_found as gifts_found,
+            chests_new as new_gifts,
             error_message,
-            model_used,
+            vision_model as model_used,
             CASE
               WHEN completed_at IS NOT NULL
               THEN EXTRACT(EPOCH FROM (completed_at - started_at))::int
               ELSE NULL
             END as duration_seconds
-          FROM runs
+          FROM scan_runs
           WHERE clan_id = $1
           ORDER BY started_at DESC
           LIMIT 10
@@ -106,19 +106,19 @@ module.exports = async function (context, req) {
         break;
 
       case "logs":
-        // Get recent log entries (simulated from runs table)
+        // Get recent log entries (from scan_runs table)
         const logsQuery = `
           SELECT
             started_at as timestamp,
             status,
             COALESCE(error_message,
               CASE
-                WHEN status = 'completed' THEN 'Run completed: ' || gifts_found || ' gifts found, ' || new_gifts || ' new'
+                WHEN status = 'completed' THEN 'Run completed: ' || chests_found || ' chests found, ' || chests_new || ' new'
                 WHEN status = 'running' THEN 'Run started'
                 ELSE 'Run ' || status
               END
             ) as message
-          FROM runs
+          FROM scan_runs
           WHERE clan_id = $1
             AND started_at > NOW() - INTERVAL '1 hour'
           ORDER BY started_at DESC
@@ -229,12 +229,12 @@ module.exports = async function (context, req) {
 
           // Check if tables exist and have data
           if (diagnostics.connection) {
-            // Check runs table
+            // Check scan_runs table (actual table used by scanner)
             try {
               const runsCheck = await pool.query(`
                 SELECT COUNT(*) as count,
                        MAX(started_at) as last_run
-                FROM runs
+                FROM scan_runs
                 WHERE clan_id = $1
               `, [DEFAULT_CLAN_ID]);
               diagnostics.tables.runs = {
