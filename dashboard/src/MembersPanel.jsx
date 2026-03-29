@@ -11,6 +11,12 @@ export function MembersPanel({ theme, API_BASE }) {
   const [editingAlias, setEditingAlias] = useState(null);
   const [editingStatus, setEditingStatus] = useState(null);
 
+  // Alias suggestion state
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [rosterInput, setRosterInput] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestingAliases, setSuggestingAliases] = useState(false);
+
   // Fetch members data
   const fetchMembers = useCallback(async () => {
     setLoading(true);
@@ -89,6 +95,51 @@ export function MembersPanel({ theme, API_BASE }) {
     } catch (e) {
       alert(`Error: ${e.message}`);
     }
+  };
+
+  // Request AI alias suggestions
+  const requestSuggestions = async () => {
+    const roster = rosterInput.split('\n').map(n => n.trim()).filter(n => n.length > 0);
+    if (roster.length === 0) {
+      alert("Please paste a list of authoritative player names (one per line)");
+      return;
+    }
+
+    setSuggestingAliases(true);
+    try {
+      const res = await fetch(`${API_BASE}/admin?action=suggest-aliases`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Code": "FOR2026-ADMIN"
+        },
+        body: JSON.stringify({ roster })
+      });
+      if (!res.ok) throw new Error("Failed to get suggestions");
+      const data = await res.json();
+      setSuggestions(data.suggestions || []);
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    } finally {
+      setSuggestingAliases(false);
+    }
+  };
+
+  // Apply a suggestion
+  const applySuggestion = async (suggestion) => {
+    if (suggestion.status === "alias" && suggestion.canonical) {
+      await saveAlias(suggestion.detected, suggestion.canonical);
+      // Remove from suggestions list
+      setSuggestions(prev => prev.filter(s => s.detected !== suggestion.detected));
+    } else if (suggestion.status === "not_found") {
+      await updateStatus(suggestion.detected, "left", "Not in roster");
+      setSuggestions(prev => prev.filter(s => s.detected !== suggestion.detected));
+    }
+  };
+
+  // Dismiss a suggestion
+  const dismissSuggestion = (detected) => {
+    setSuggestions(prev => prev.filter(s => s.detected !== detected));
   };
 
   // Filter members
@@ -193,6 +244,21 @@ export function MembersPanel({ theme, API_BASE }) {
           ))}
         </div>
         <button
+          onClick={() => setShowSuggestions(!showSuggestions)}
+          style={{
+            padding: "6px 14px",
+            fontSize: 12,
+            border: `1px solid ${theme.gold}`,
+            borderRadius: 6,
+            cursor: "pointer",
+            background: showSuggestions ? theme.gold : "transparent",
+            color: showSuggestions ? "#fff" : theme.gold,
+            marginLeft: "auto"
+          }}
+        >
+          AI Suggest Aliases
+        </button>
+        <button
           onClick={fetchMembers}
           style={{
             padding: "6px 14px",
@@ -201,13 +267,84 @@ export function MembersPanel({ theme, API_BASE }) {
             borderRadius: 6,
             cursor: "pointer",
             background: "transparent",
-            color: theme.textMuted,
-            marginLeft: "auto"
+            color: theme.textMuted
           }}
         >
           Refresh
         </button>
       </div>
+
+      {/* AI Alias Suggestions Panel */}
+      {showSuggestions && (
+        <div style={{
+          background: theme.surface,
+          border: `1px solid ${theme.gold}`,
+          borderRadius: 10,
+          padding: 16,
+          marginBottom: 16
+        }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: theme.text, marginBottom: 12 }}>
+            AI Alias Suggestions
+          </h3>
+          <p style={{ fontSize: 12, color: theme.textMuted, marginBottom: 12 }}>
+            Paste your authoritative clan roster (one name per line) and Claude will match detected names to find typos and departed members.
+          </p>
+          <textarea
+            value={rosterInput}
+            onChange={(e) => setRosterInput(e.target.value)}
+            placeholder="Paste roster here (one name per line)&#10;Example:&#10;Sedtis Sharpstone&#10;DarkKnight42&#10;ClanLeader"
+            style={{
+              width: "100%",
+              minHeight: 120,
+              padding: 10,
+              fontSize: 12,
+              border: `1px solid ${theme.border}`,
+              borderRadius: 6,
+              background: theme.bg,
+              color: theme.text,
+              fontFamily: "inherit",
+              resize: "vertical",
+              marginBottom: 12
+            }}
+          />
+          <button
+            onClick={requestSuggestions}
+            disabled={suggestingAliases}
+            style={{
+              padding: "8px 16px",
+              fontSize: 13,
+              fontWeight: 500,
+              border: "none",
+              borderRadius: 6,
+              cursor: suggestingAliases ? "not-allowed" : "pointer",
+              background: suggestingAliases ? theme.border : theme.gold,
+              color: "#fff"
+            }}
+          >
+            {suggestingAliases ? "Analyzing..." : "Analyze with Claude"}
+          </button>
+
+          {/* Suggestions Results */}
+          {suggestions.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <h4 style={{ fontSize: 13, fontWeight: 500, color: theme.text, marginBottom: 10 }}>
+                Suggestions ({suggestions.length})
+              </h4>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {suggestions.map(s => (
+                  <SuggestionRow
+                    key={s.detected}
+                    suggestion={s}
+                    onApply={() => applySuggestion(s)}
+                    onDismiss={() => dismissSuggestion(s.detected)}
+                    theme={theme}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Members Table */}
       {loading ? (
@@ -516,6 +653,84 @@ function StatusEditor({ currentStatus, currentNotes, onSave, onCancel, theme }) 
         }}
       >
         Cancel
+      </button>
+    </div>
+  );
+}
+
+// AI suggestion row
+function SuggestionRow({ suggestion, onApply, onDismiss, theme }) {
+  const { detected, status, canonical, confidence } = suggestion;
+
+  const statusColors = {
+    exact: { bg: `${theme.green}15`, text: theme.green, label: "Exact match" },
+    alias: { bg: `${theme.gold}15`, text: theme.gold, label: "Likely alias" },
+    not_found: { bg: `${theme.red}15`, text: theme.red, label: "Not in roster" }
+  };
+  const c = statusColors[status] || statusColors.not_found;
+
+  return (
+    <div style={{
+      display: "flex",
+      alignItems: "center",
+      gap: 12,
+      padding: "10px 12px",
+      background: theme.bg,
+      borderRadius: 6,
+      border: `1px solid ${theme.border}`
+    }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: theme.text }}>
+          {detected}
+        </div>
+        {status === "alias" && canonical && (
+          <div style={{ fontSize: 12, color: theme.gold, marginTop: 2 }}>
+            → {canonical}
+          </div>
+        )}
+      </div>
+      <span style={{
+        padding: "3px 10px",
+        borderRadius: 12,
+        fontSize: 11,
+        fontWeight: 500,
+        background: c.bg,
+        color: c.text
+      }}>
+        {c.label}
+      </span>
+      <span style={{ fontSize: 11, color: theme.textMuted }}>
+        {Math.round(confidence * 100)}%
+      </span>
+      {status !== "exact" && (
+        <button
+          onClick={onApply}
+          style={{
+            padding: "4px 10px",
+            fontSize: 11,
+            border: "none",
+            borderRadius: 4,
+            background: theme.green,
+            color: "#fff",
+            cursor: "pointer"
+          }}
+        >
+          Apply
+        </button>
+      )}
+      <button
+        onClick={onDismiss}
+        style={{
+          padding: "4px 10px",
+          fontSize: 11,
+          border: `1px solid ${theme.border}`,
+          borderRadius: 4,
+          background: "transparent",
+          color: theme.textMuted,
+          cursor: "pointer"
+        }}
+      >
+        Dismiss
       </button>
     </div>
   );

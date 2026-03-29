@@ -593,6 +593,110 @@ module.exports = async function (context, req) {
         }
         break;
 
+      case "suggest-aliases":
+        // Use Claude to match detected names to authoritative roster
+        if (req.method !== "POST") {
+          context.res = { status: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+          break;
+        }
+
+        try {
+          let suggestBody = {};
+          try {
+            suggestBody = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+          } catch (parseErr) {
+            context.log.warn("Failed to parse suggest-aliases body:", parseErr);
+          }
+
+          // Get authoritative roster from request body
+          const authoritativeRoster = suggestBody.roster || [];
+          if (!authoritativeRoster.length) {
+            context.res = {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ error: "roster array is required (list of authoritative player names)" })
+            };
+            break;
+          }
+
+          // Get all detected names from chests that aren't already aliased
+          const detectedQuery = `
+            SELECT DISTINCT c.player_name, COUNT(*) as chest_count
+            FROM chests c
+            LEFT JOIN member_aliases ma ON c.player_name = ma.raw_name AND ma.clan_id = c.clan_id
+            WHERE c.clan_id = $1 AND ma.id IS NULL
+            GROUP BY c.player_name
+            ORDER BY c.player_name
+          `;
+          const detected = await pool.query(detectedQuery, ["FOR"]);
+          const detectedNames = detected.rows.map(r => ({ name: r.player_name, chests: parseInt(r.chest_count) }));
+
+          // Call Claude API to suggest matches
+          const Anthropic = require("@anthropic-ai/sdk");
+          const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+          const prompt = `You are analyzing player names from a game clan. I have two lists:
+
+1. AUTHORITATIVE ROSTER (correct names):
+${authoritativeRoster.map(n => `- ${n}`).join('\n')}
+
+2. DETECTED NAMES (from OCR, may have typos):
+${detectedNames.map(d => `- "${d.name}" (${d.chests} chests)`).join('\n')}
+
+For each detected name, determine if it:
+- Exactly matches a roster name (status: "exact")
+- Is a typo/OCR error of a roster name (status: "alias", suggest the correct name)
+- Is not in the roster - probably left the clan (status: "not_found")
+
+Return JSON only:
+{
+  "suggestions": [
+    {"detected": "SedtisSharpston", "status": "alias", "canonical": "Sedtis Sharpstone", "confidence": 0.95},
+    {"detected": "Sedtis Sharpstone", "status": "exact", "canonical": "Sedtis Sharpstone", "confidence": 1.0},
+    {"detected": "OldPlayer123", "status": "not_found", "canonical": null, "confidence": 0.9}
+  ]
+}
+
+Be generous with matching - OCR often misses spaces, confuses similar characters (l/I/1, 0/O), or truncates names.`;
+
+          const response = await anthropic.messages.create({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 4096,
+            messages: [{ role: "user", content: prompt }]
+          });
+
+          let suggestions = [];
+          try {
+            let text = response.content[0].text;
+            // Extract JSON from response
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              const data = JSON.parse(jsonMatch[0]);
+              suggestions = data.suggestions || [];
+            }
+          } catch (parseErr) {
+            context.log.warn("Failed to parse Claude response:", parseErr);
+          }
+
+          context.res = {
+            status: 200,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({
+              suggestions,
+              detectedCount: detectedNames.length,
+              rosterCount: authoritativeRoster.length
+            })
+          };
+        } catch (suggestErr) {
+          context.log.error("Suggest aliases error:", suggestErr);
+          context.res = {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ error: "Failed to suggest aliases", detail: suggestErr.message })
+          };
+        }
+        break;
+
       case "member-status":
         // Update member status (active, left, etc.)
         if (req.method !== "POST") {
