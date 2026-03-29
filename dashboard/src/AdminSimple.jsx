@@ -17,6 +17,13 @@ export function AdminPanel({ theme, API_BASE }) {
   const [triggerMessage, setTriggerMessage] = useState("");
   const [diagnostics, setDiagnostics] = useState(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [targetSettings, setTargetSettings] = useState({
+    weekly_chest_target: 30,
+    weekly_point_target: 100,
+    target_type: "chests"
+  });
+  const [targetLoading, setTargetLoading] = useState(false);
+  const [targetMessage, setTargetMessage] = useState("");
 
   // Check if admin code is correct
   const checkAdminAuth = () => {
@@ -66,6 +73,57 @@ export function AdminPanel({ theme, API_BASE }) {
       console.error("Failed to fetch logs:", e);
     }
   }, [authorized, apiBase]);
+
+  // Fetch target settings
+  const fetchTargetSettings = useCallback(async () => {
+    if (!authorized) return;
+
+    try {
+      const res = await fetch(`${apiBase}/targets`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.settings) {
+          setTargetSettings({
+            weekly_chest_target: data.settings.weekly_chest_target || 30,
+            weekly_point_target: data.settings.weekly_point_target || 100,
+            target_type: data.settings.target_type || "chests"
+          });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch target settings:", e);
+    }
+  }, [authorized, apiBase]);
+
+  // Save target settings
+  const saveTargetSettings = async () => {
+    setTargetLoading(true);
+    setTargetMessage("");
+
+    try {
+      const res = await fetch(`${apiBase}/targets`, {
+        method: "POST",
+        headers: {
+          "X-Admin-Code": "FOR2026-ADMIN",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(targetSettings)
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        setTargetMessage("Settings saved successfully");
+        setTimeout(() => setTargetMessage(""), 3000);
+      } else {
+        setTargetMessage(`Error: ${data.error}`);
+      }
+    } catch (e) {
+      setTargetMessage(`Failed to save: ${e.message}`);
+    } finally {
+      setTargetLoading(false);
+    }
+  };
 
   // Trigger job
   const triggerJob = async () => {
@@ -252,8 +310,9 @@ export function AdminPanel({ theme, API_BASE }) {
     if (authorized) {
       fetchStatus();
       fetchLogs();
+      fetchTargetSettings();
     }
-  }, [authorized, fetchStatus, fetchLogs]);
+  }, [authorized, fetchStatus, fetchLogs, fetchTargetSettings]);
 
   if (!authorized) {
     return (
@@ -608,6 +667,115 @@ export function AdminPanel({ theme, API_BASE }) {
           </div>
         </div>
       )}
+
+      {/* Weekly Targets */}
+      <div style={{
+        background: theme.surface,
+        border: `1px solid ${theme.border}`,
+        borderRadius: 10,
+        padding: 20,
+        marginBottom: 20
+      }}>
+        <h3 style={{ color: theme.gold, marginBottom: 15, fontSize: 16 }}>Weekly Targets</h3>
+        <p style={{ color: theme.textMuted, fontSize: 13, marginBottom: 15 }}>
+          Set weekly contribution targets for clan members. These appear as progress bars on the leaderboard.
+        </p>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 15, marginBottom: 15 }}>
+          <div>
+            <label style={{ display: "block", color: theme.textMuted, fontSize: 12, marginBottom: 6 }}>
+              Target Type
+            </label>
+            <select
+              value={targetSettings.target_type}
+              onChange={(e) => setTargetSettings(s => ({ ...s, target_type: e.target.value }))}
+              style={{
+                width: "100%",
+                padding: "8px 12px",
+                background: theme.bg,
+                border: `1px solid ${theme.border}`,
+                color: theme.text,
+                borderRadius: 6,
+                fontSize: 14,
+                cursor: "pointer"
+              }}
+            >
+              <option value="chests">Chests per week</option>
+              <option value="points">Points per week</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: "block", color: theme.textMuted, fontSize: 12, marginBottom: 6 }}>
+              Weekly Chest Target
+            </label>
+            <input
+              type="number"
+              value={targetSettings.weekly_chest_target}
+              onChange={(e) => setTargetSettings(s => ({ ...s, weekly_chest_target: parseInt(e.target.value) || 0 }))}
+              style={{
+                width: "100%",
+                padding: "8px 12px",
+                background: theme.bg,
+                border: `1px solid ${theme.border}`,
+                color: theme.text,
+                borderRadius: 6,
+                fontSize: 14,
+                boxSizing: "border-box"
+              }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: "block", color: theme.textMuted, fontSize: 12, marginBottom: 6 }}>
+              Weekly Point Target
+            </label>
+            <input
+              type="number"
+              value={targetSettings.weekly_point_target}
+              onChange={(e) => setTargetSettings(s => ({ ...s, weekly_point_target: parseInt(e.target.value) || 0 }))}
+              style={{
+                width: "100%",
+                padding: "8px 12px",
+                background: theme.bg,
+                border: `1px solid ${theme.border}`,
+                color: theme.text,
+                borderRadius: 6,
+                fontSize: 14,
+                boxSizing: "border-box"
+              }}
+            />
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 15 }}>
+          <button
+            onClick={saveTargetSettings}
+            disabled={targetLoading}
+            style={{
+              padding: "8px 20px",
+              background: targetLoading ? theme.border : theme.gold,
+              color: targetLoading ? theme.textMuted : theme.bg,
+              border: "none",
+              borderRadius: 6,
+              cursor: targetLoading ? "not-allowed" : "pointer",
+              fontSize: 14,
+              fontWeight: 600
+            }}
+          >
+            {targetLoading ? "Saving..." : "Save Targets"}
+          </button>
+
+          {targetMessage && (
+            <span style={{
+              color: targetMessage.startsWith("Error") ? theme.red : theme.green,
+              fontSize: 13
+            }}>
+              {targetMessage.startsWith("Error") ? "❌" : "✅"} {targetMessage}
+            </span>
+          )}
+        </div>
+      </div>
 
       {/* Recent Runs */}
       <div style={{
