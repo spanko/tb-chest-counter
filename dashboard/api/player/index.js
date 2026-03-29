@@ -3,7 +3,7 @@ const { getPool } = require("../shared/db");
 module.exports = async function (context, req) {
   const playerName = req.query.name || req.params.name;
   const hours = parseInt(req.query.hours) || 168;
-  const clanId = req.query.clan_id || "FOR";
+  const clanId = req.query.clan_id || "for-main";
 
   if (!playerName) {
     context.res = {

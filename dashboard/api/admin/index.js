@@ -1,5 +1,8 @@
 const { getPool } = require("../shared/db");
 
+// Default clan ID - matches scanner output
+const DEFAULT_CLAN_ID = "for-main";
+
 // Simple admin endpoint that provides job status from database
 module.exports = async function (context, req) {
   // Handle CORS preflight
@@ -63,7 +66,7 @@ module.exports = async function (context, req) {
           LIMIT 10
         `;
 
-        const runs = await pool.query(runsQuery, ["FOR"]);
+        const runs = await pool.query(runsQuery, [DEFAULT_CLAN_ID]);
 
         // Get summary stats
         const statsQuery = `
@@ -77,7 +80,7 @@ module.exports = async function (context, req) {
           AND scanned_at > NOW() - INTERVAL '7 days'
         `;
 
-        const stats = await pool.query(statsQuery, ["FOR"]);
+        const stats = await pool.query(statsQuery, [DEFAULT_CLAN_ID]);
 
         context.res = {
           status: 200,
@@ -122,7 +125,7 @@ module.exports = async function (context, req) {
           LIMIT 50
         `;
 
-        const logs = await pool.query(logsQuery, ["FOR"]);
+        const logs = await pool.query(logsQuery, [DEFAULT_CLAN_ID]);
 
         context.res = {
           status: 200,
@@ -177,7 +180,7 @@ module.exports = async function (context, req) {
             VALUES ($1, NOW(), 'requested', 'manual')
             RETURNING run_id
           `;
-          const result = await pool.query(logQuery, ["FOR"]);
+          const result = await pool.query(logQuery, [DEFAULT_CLAN_ID]);
 
           context.res = {
             status: 200,
@@ -233,7 +236,7 @@ module.exports = async function (context, req) {
                        MAX(started_at) as last_run
                 FROM runs
                 WHERE clan_id = $1
-              `, ["FOR"]);
+              `, [DEFAULT_CLAN_ID]);
               diagnostics.tables.runs = {
                 exists: true,
                 count: parseInt(runsCheck.rows[0].count),
@@ -267,7 +270,7 @@ module.exports = async function (context, req) {
                        MAX(scanned_at) as last_scan
                 FROM chests
                 WHERE clan_id = $1
-              `, ["FOR"]);
+              `, [DEFAULT_CLAN_ID]);
               diagnostics.tables.chests = {
                 exists: true,
                 count: parseInt(chestsCheck.rows[0].count),
@@ -470,7 +473,7 @@ module.exports = async function (context, req) {
             ORDER BY ps.last_seen DESC
           `;
 
-          const members = await pool.query(membersQuery, ["FOR"]);
+          const members = await pool.query(membersQuery, [DEFAULT_CLAN_ID]);
 
           // Also get the list of canonical names (for alias target dropdown)
           const canonicalQuery = `
@@ -480,7 +483,7 @@ module.exports = async function (context, req) {
             WHERE c.clan_id = $1
             ORDER BY name
           `;
-          const canonicals = await pool.query(canonicalQuery, ["FOR"]);
+          const canonicals = await pool.query(canonicalQuery, [DEFAULT_CLAN_ID]);
 
           context.res = {
             status: 200,
@@ -549,7 +552,7 @@ module.exports = async function (context, req) {
             // Remove alias
             await pool.query(
               `DELETE FROM member_aliases WHERE raw_name = $1 AND clan_id = $2`,
-              [rawName, "FOR"]
+              [rawName, DEFAULT_CLAN_ID]
             );
             context.res = {
               status: 200,
@@ -572,7 +575,7 @@ module.exports = async function (context, req) {
               VALUES ($1, $2, $3)
               ON CONFLICT (raw_name, clan_id)
               DO UPDATE SET canonical_name = $2
-            `, [rawName, canonicalName, "FOR"]);
+            `, [rawName, canonicalName, DEFAULT_CLAN_ID]);
 
             context.res = {
               status: 200,
@@ -628,7 +631,7 @@ module.exports = async function (context, req) {
             GROUP BY c.player_name
             ORDER BY c.player_name
           `;
-          const detected = await pool.query(detectedQuery, ["FOR"]);
+          const detected = await pool.query(detectedQuery, [DEFAULT_CLAN_ID]);
           const detectedNames = detected.rows.map(r => ({ name: r.player_name, chests: parseInt(r.chest_count) }));
 
           // Call Claude API to suggest matches
@@ -730,7 +733,7 @@ Be generous with matching - OCR often misses spaces, confuses similar characters
             VALUES ($1, $2, $3, ${status === 'left' ? 'NOW()' : 'NULL'}, $4, NOW())
             ON CONFLICT (player_name, clan_id)
             DO UPDATE SET status = $3, left_at = ${status === 'left' ? 'NOW()' : 'NULL'}, notes = $4, updated_at = NOW()
-          `, [playerName, "FOR", status, notes || null]);
+          `, [playerName, DEFAULT_CLAN_ID, status, notes || null]);
 
           context.res = {
             status: 200,
