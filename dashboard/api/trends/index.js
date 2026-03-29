@@ -4,11 +4,51 @@ module.exports = async function (context, req) {
   const hours = parseInt(req.query.hours) || 168; // default 7 days
   const clanId = req.query.clan_id || null;
   const granularity = req.query.granularity || "daily"; // daily or hourly
+  const group = req.query.group || null; // "dow" for day-of-week
 
   const clampedHours = Math.min(Math.max(hours, 1), 8760);
 
   try {
     const pool = getPool();
+
+    // Day-of-week aggregation
+    if (group === "dow") {
+      let dowQuery = `
+        SELECT
+          EXTRACT(DOW FROM c.scanned_at)::int AS day_of_week,
+          COUNT(*)::int AS chest_count,
+          COALESCE(SUM(c.points), 0)::int AS total_points,
+          COUNT(DISTINCT c.player_name)::int AS active_players
+        FROM chests c
+        WHERE c.scanned_at > NOW() - make_interval(hours => $1)
+      `;
+      const dowParams = [clampedHours];
+
+      if (clanId) {
+        dowQuery += ` AND c.clan_id = $2`;
+        dowParams.push(clanId);
+      }
+
+      dowQuery += ` GROUP BY day_of_week ORDER BY day_of_week ASC`;
+
+      const dowResult = await pool.query(dowQuery, dowParams);
+
+      context.res = {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hours: clampedHours,
+          group: "dow",
+          data: dowResult.rows.map((r) => ({
+            day_of_week: r.day_of_week,
+            chests: r.chest_count,
+            points: r.total_points,
+            players: r.active_players,
+          })),
+        }),
+      };
+      return;
+    }
 
     // Daily aggregation for trend chart
     let query;

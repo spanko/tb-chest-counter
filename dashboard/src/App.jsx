@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { AdminPanel } from "./AdminSimple";
-import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { PieChart, Pie, Cell, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const ACCESS_CODE = "FOR2026"; // Change this or move to env var
@@ -297,10 +297,332 @@ function DailyTrendChart({ data }) {
   );
 }
 
+// ── Status Badge ─────────────────────────────────────────────────────────────
+function StatusBadge({ status }) {
+  const statusConfig = {
+    completed: { label: "Done", bg: `${theme.green}25`, color: theme.green, icon: "✓" },
+    on_track: { label: "On Track", bg: `${theme.green}15`, color: theme.green, icon: "●" },
+    at_risk: { label: "At Risk", bg: "#fb923c25", color: "#fb923c", icon: "!" },
+    behind: { label: "Behind", bg: `${theme.red}20`, color: theme.red, icon: "↓" },
+    inactive: { label: "Inactive", bg: `${theme.textMuted}15`, color: theme.textMuted, icon: "○" },
+  };
+
+  const config = statusConfig[status] || statusConfig.inactive;
+
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      padding: "2px 8px", borderRadius: 10, fontSize: 10, fontWeight: 600,
+      background: config.bg, color: config.color, textTransform: "uppercase", letterSpacing: 0.5,
+    }}>
+      <span style={{ fontSize: 8 }}>{config.icon}</span> {config.label}
+    </span>
+  );
+}
+
+// ── Progress Bar ─────────────────────────────────────────────────────────────
+function ProgressBar({ value, max, status }) {
+  const pct = Math.min((value / max) * 100, 100);
+  const barColor = status === "completed" ? theme.green
+    : status === "on_track" ? theme.green
+    : status === "at_risk" ? "#fb923c"
+    : status === "behind" ? theme.red
+    : theme.textMuted;
+
+  return (
+    <div style={{
+      width: "100%", height: 6, background: theme.border, borderRadius: 3, overflow: "hidden",
+    }}>
+      <div style={{
+        width: `${pct}%`, height: "100%", background: barColor, borderRadius: 3,
+        transition: "width 0.3s ease",
+      }} />
+    </div>
+  );
+}
+
+// ── At-Risk Callout ──────────────────────────────────────────────────────────
+function AtRiskCallout({ players, target, targetType }) {
+  if (!players || players.length === 0) return null;
+
+  return (
+    <div style={{
+      background: `${theme.red}10`, border: `1px solid ${theme.red}30`,
+      borderRadius: 10, padding: "16px 20px", marginBottom: 24,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <span style={{ fontSize: 16 }}>⚠️</span>
+        <h3 style={{ fontSize: 14, color: theme.red, margin: 0, fontWeight: 600 }}>
+          Members At Risk ({players.length})
+        </h3>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {players.slice(0, 8).map((p) => (
+          <div key={p.player_name} style={{
+            background: theme.surface, border: `1px solid ${theme.border}`,
+            borderRadius: 6, padding: "8px 12px", fontSize: 12,
+          }}>
+            <span style={{ color: theme.textBright, fontWeight: 500 }}>{p.player_name}</span>
+            <span style={{ color: theme.textMuted, marginLeft: 8 }}>
+              {p[targetType === "points" ? "total_points" : "chest_count"]}/{target}
+            </span>
+            <span style={{ color: theme.red, marginLeft: 4, fontSize: 10 }}>
+              ({p.progress}%)
+            </span>
+          </div>
+        ))}
+        {players.length > 8 && (
+          <div style={{
+            background: theme.surface, border: `1px solid ${theme.border}`,
+            borderRadius: 6, padding: "8px 12px", fontSize: 12, color: theme.textMuted,
+          }}>
+            +{players.length - 8} more
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Day of Week Chart ────────────────────────────────────────────────────────
+function DayOfWeekChart({ data }) {
+  if (!data || data.length === 0) return null;
+
+  const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const formatted = data.map((d) => ({
+    ...d,
+    label: dayLabels[d.day_of_week] || d.day_of_week,
+  }));
+
+  return (
+    <div style={{
+      background: theme.surface, border: `1px solid ${theme.border}`,
+      borderRadius: 10, padding: "18px 22px",
+    }}>
+      <h3 style={{ fontSize: 14, color: theme.textMuted, marginBottom: 16, textTransform: "uppercase", letterSpacing: 1 }}>
+        Activity by Day
+      </h3>
+      <div style={{ width: "100%", height: 160 }}>
+        <ResponsiveContainer>
+          <BarChart data={formatted} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: theme.textMuted }} axisLine={{ stroke: theme.border }} tickLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: theme.textMuted }} axisLine={false} tickLine={false} width={40} />
+            <Tooltip
+              contentStyle={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 6, fontSize: 12 }}
+              labelStyle={{ color: theme.textBright }}
+            />
+            <Bar dataKey="chests" fill={theme.gold} radius={[4, 4, 0, 0]} name="Chests" />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+// ── Chest Archive Table ──────────────────────────────────────────────────────
+function ChestArchive({ API_BASE }) {
+  const [chests, setChests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ total: 0, total_pages: 1 });
+  const [filters, setFilters] = useState({ player: "", chest_type: "", category: "", hours: "" });
+  const [categories, setCategories] = useState([]);
+
+  const fetchChests = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page, limit: 50 });
+      if (filters.player) params.set("player", filters.player);
+      if (filters.chest_type) params.set("chest_type", filters.chest_type);
+      if (filters.category) params.set("category", filters.category);
+      if (filters.hours) params.set("hours", filters.hours);
+
+      const res = await fetch(`${API_BASE}/chests?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        setChests(data.chests || []);
+        setPagination(data.pagination || { total: 0, total_pages: 1 });
+        setCategories(data.filters?.categories || []);
+      }
+    } catch (e) {
+      console.error("Failed to fetch chests:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, [API_BASE, page, filters]);
+
+  useEffect(() => { fetchChests(); }, [fetchChests]);
+
+  const handleExport = () => {
+    const params = new URLSearchParams({ export: "csv" });
+    if (filters.player) params.set("player", filters.player);
+    if (filters.chest_type) params.set("chest_type", filters.chest_type);
+    if (filters.category) params.set("category", filters.category);
+    if (filters.hours) params.set("hours", filters.hours);
+    window.open(`${API_BASE}/chests?${params}`, "_blank");
+  };
+
+  const updateFilter = (key, value) => {
+    setFilters((f) => ({ ...f, [key]: value }));
+    setPage(1);
+  };
+
+  return (
+    <div>
+      {/* Filters */}
+      <div style={{
+        display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 20,
+        background: theme.surface, border: `1px solid ${theme.border}`,
+        borderRadius: 10, padding: 16,
+      }}>
+        <input
+          type="text"
+          placeholder="Search player..."
+          value={filters.player}
+          onChange={(e) => updateFilter("player", e.target.value)}
+          style={{
+            flex: "1 1 150px", padding: "8px 12px", borderRadius: 6,
+            border: `1px solid ${theme.border}`, background: theme.bg,
+            color: theme.textBright, fontSize: 13, outline: "none",
+          }}
+        />
+        <input
+          type="text"
+          placeholder="Chest type..."
+          value={filters.chest_type}
+          onChange={(e) => updateFilter("chest_type", e.target.value)}
+          style={{
+            flex: "1 1 150px", padding: "8px 12px", borderRadius: 6,
+            border: `1px solid ${theme.border}`, background: theme.bg,
+            color: theme.textBright, fontSize: 13, outline: "none",
+          }}
+        />
+        <select
+          value={filters.category}
+          onChange={(e) => updateFilter("category", e.target.value)}
+          style={{
+            flex: "0 1 140px", padding: "8px 12px", borderRadius: 6,
+            border: `1px solid ${theme.border}`, background: theme.bg,
+            color: theme.textBright, fontSize: 13, outline: "none", cursor: "pointer",
+          }}
+        >
+          <option value="">All Categories</option>
+          {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select
+          value={filters.hours}
+          onChange={(e) => updateFilter("hours", e.target.value)}
+          style={{
+            flex: "0 1 120px", padding: "8px 12px", borderRadius: 6,
+            border: `1px solid ${theme.border}`, background: theme.bg,
+            color: theme.textBright, fontSize: 13, outline: "none", cursor: "pointer",
+          }}
+        >
+          <option value="">All Time</option>
+          <option value="24">Last 24h</option>
+          <option value="168">Last Week</option>
+          <option value="720">Last Month</option>
+        </select>
+        <button
+          onClick={handleExport}
+          style={{
+            padding: "8px 16px", borderRadius: 6, fontSize: 12, fontWeight: 600,
+            background: theme.gold, color: theme.bg, border: "none",
+            cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+          }}
+        >
+          📥 Export CSV
+        </button>
+      </div>
+
+      {/* Table */}
+      <div style={{
+        background: theme.surface, border: `1px solid ${theme.border}`,
+        borderRadius: 10, overflow: "hidden",
+      }}>
+        {loading ? (
+          <div style={{ padding: 40, textAlign: "center", color: theme.textMuted }}>Loading...</div>
+        ) : chests.length === 0 ? (
+          <div style={{ padding: 40, textAlign: "center", color: theme.textMuted }}>No chests found</div>
+        ) : (
+          <>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${theme.border}` }}>
+                  <th style={{ padding: "12px", textAlign: "left", color: theme.textMuted, fontSize: 11, textTransform: "uppercase" }}>Player</th>
+                  <th style={{ padding: "12px", textAlign: "left", color: theme.textMuted, fontSize: 11, textTransform: "uppercase" }}>Chest Type</th>
+                  <th style={{ padding: "12px", textAlign: "left", color: theme.textMuted, fontSize: 11, textTransform: "uppercase" }}>Category</th>
+                  <th style={{ padding: "12px", textAlign: "right", color: theme.textMuted, fontSize: 11, textTransform: "uppercase" }}>Points</th>
+                  <th style={{ padding: "12px", textAlign: "right", color: theme.textMuted, fontSize: 11, textTransform: "uppercase" }}>Scanned</th>
+                </tr>
+              </thead>
+              <tbody>
+                {chests.map((c) => (
+                  <tr key={c.id} style={{ borderBottom: `1px solid ${theme.border}` }}>
+                    <td style={{ padding: "10px 12px", color: theme.textBright }}>{c.player_name}</td>
+                    <td style={{ padding: "10px 12px", color: theme.text }}>{c.chest_type}</td>
+                    <td style={{ padding: "10px 12px", color: theme.textMuted }}>{c.category || "—"}</td>
+                    <td style={{ padding: "10px 12px", textAlign: "right", color: theme.goldDim, fontWeight: 600 }}>{c.points}</td>
+                    <td style={{ padding: "10px 12px", textAlign: "right", color: theme.textMuted, fontSize: 12 }}>
+                      {c.scanned_at ? new Date(c.scanned_at).toLocaleString() : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Pagination */}
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "12px 16px", borderTop: `1px solid ${theme.border}`,
+            }}>
+              <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                Showing {chests.length} of {pagination.total} chests
+              </span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  disabled={page === 1}
+                  onClick={() => setPage((p) => p - 1)}
+                  style={{
+                    padding: "6px 12px", borderRadius: 4, fontSize: 12,
+                    background: page === 1 ? theme.border : theme.surfaceHover,
+                    color: page === 1 ? theme.textMuted : theme.textBright,
+                    border: "none", cursor: page === 1 ? "default" : "pointer",
+                  }}
+                >← Prev</button>
+                <span style={{ color: theme.textMuted, fontSize: 12, padding: "6px 8px" }}>
+                  Page {page} of {pagination.total_pages}
+                </span>
+                <button
+                  disabled={page >= pagination.total_pages}
+                  onClick={() => setPage((p) => p + 1)}
+                  style={{
+                    padding: "6px 12px", borderRadius: 4, fontSize: 12,
+                    background: page >= pagination.total_pages ? theme.border : theme.surfaceHover,
+                    color: page >= pagination.total_pages ? theme.textMuted : theme.textBright,
+                    border: "none", cursor: page >= pagination.total_pages ? "default" : "pointer",
+                  }}
+                >Next →</button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Player Row ──────────────────────────────────────────────────────────────
-function PlayerRow({ rank, player, onSelect, isExpanded, breakdown }) {
+function PlayerRow({ rank, player, onSelect, isExpanded, breakdown, targetData }) {
   const rankColor = rank === 1 ? theme.rank1 : rank === 2 ? theme.rank2 : rank === 3 ? theme.rank3 : theme.textMuted;
   const medal = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : `${rank}`;
+
+  // Find target progress for this player
+  const playerTarget = targetData?.players?.find((p) => p.player_name === player.player_name);
+  const hasTarget = targetData && playerTarget;
+  const target = targetData?.settings?.target_type === "points"
+    ? targetData?.settings?.weekly_point_target
+    : targetData?.settings?.weekly_chest_target;
 
   return (
     <>
@@ -317,7 +639,21 @@ function PlayerRow({ rank, player, onSelect, isExpanded, breakdown }) {
         <td style={{ width: 48, textAlign: "center", fontWeight: 700, color: rankColor, fontSize: rank <= 3 ? 18 : 14 }}>
           {medal}
         </td>
-        <td style={{ color: theme.textBright, fontWeight: 500 }}>{player.player_name}</td>
+        <td style={{ color: theme.textBright, fontWeight: 500 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {player.player_name}
+            {hasTarget && <StatusBadge status={playerTarget.status} />}
+          </div>
+          {hasTarget && (
+            <div style={{ marginTop: 6, width: 120 }}>
+              <ProgressBar
+                value={targetData.settings.target_type === "points" ? playerTarget.total_points : playerTarget.chest_count}
+                max={target}
+                status={playerTarget.status}
+              />
+            </div>
+          )}
+        </td>
         <td style={{ textAlign: "right", fontFamily: font, color: theme.goldBright, fontWeight: 700, fontSize: 16 }}>
           {player.total_points?.toLocaleString()}
         </td>
@@ -362,6 +698,8 @@ function Dashboard() {
   const [sources, setSources] = useState(null);
   const [trends, setTrends] = useState(null);
   const [health, setHealth] = useState(null);
+  const [targetData, setTargetData] = useState(null);
+  const [dayOfWeek, setDayOfWeek] = useState(null);
 
   const hours = TIME_RANGES.find((r) => r.key === range)?.hours || 168;
 
@@ -419,8 +757,32 @@ function Dashboard() {
     }
   }, []);
 
-  useEffect(() => { fetchLeaderboard(); fetchSources(); fetchTrends(); }, [fetchLeaderboard, fetchSources, fetchTrends]);
-  useEffect(() => { fetchHealth(); }, [fetchHealth]);
+  const fetchTargets = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/targets`);
+      if (res.ok) {
+        const data = await res.json();
+        setTargetData(data);
+      }
+    } catch {
+      setTargetData(null);
+    }
+  }, []);
+
+  const fetchDayOfWeek = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/trends?hours=${hours}&group=dow`);
+      if (res.ok) {
+        const data = await res.json();
+        setDayOfWeek(data.data || []);
+      }
+    } catch {
+      setDayOfWeek(null);
+    }
+  }, [hours]);
+
+  useEffect(() => { fetchLeaderboard(); fetchSources(); fetchTrends(); fetchDayOfWeek(); }, [fetchLeaderboard, fetchSources, fetchTrends, fetchDayOfWeek]);
+  useEffect(() => { fetchHealth(); fetchTargets(); }, [fetchHealth, fetchTargets]);
 
   const handlePlayerSelect = async (name) => {
     if (expandedPlayer === name) {
@@ -482,6 +844,16 @@ function Dashboard() {
             }}
           >Leaderboard</button>
           <button
+            onClick={() => setActiveTab("archive")}
+            style={{
+              background: activeTab === "archive" ? theme.gold : "transparent",
+              color: activeTab === "archive" ? theme.bg : theme.textMuted,
+              border: `1px solid ${activeTab === "archive" ? theme.gold : theme.border}`,
+              padding: "8px 16px", borderRadius: 6, fontSize: 12,
+              cursor: "pointer", fontFamily: fontBody, fontWeight: 600,
+            }}
+          >Archive</button>
+          <button
             onClick={() => setActiveTab("admin")}
             style={{
               background: activeTab === "admin" ? theme.gold : "transparent",
@@ -506,9 +878,11 @@ function Dashboard() {
         </div>
       </div>
 
-      <div style={{ maxWidth: activeTab === "admin" ? 1000 : 800, margin: "0 auto", padding: "24px 16px" }}>
+      <div style={{ maxWidth: activeTab === "admin" ? 1000 : 900, margin: "0 auto", padding: "24px 16px" }}>
         {activeTab === "admin" ? (
           <AdminPanel theme={theme} API_BASE={API_BASE} />
+        ) : activeTab === "archive" ? (
+          <ChestArchive API_BASE={API_BASE} />
         ) : (
           <>
         {/* Time Range Tabs */}
@@ -556,7 +930,17 @@ function Dashboard() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, marginBottom: 24 }}>
           <CategoryDonutChart data={sources} />
           <DailyTrendChart data={trends?.data} />
+          <DayOfWeekChart data={dayOfWeek} />
         </div>
+
+        {/* At-Risk Members Callout */}
+        <AtRiskCallout
+          players={targetData?.at_risk}
+          target={targetData?.settings?.target_type === "points"
+            ? targetData?.settings?.weekly_point_target
+            : targetData?.settings?.weekly_chest_target}
+          targetType={targetData?.settings?.target_type || "chests"}
+        />
 
         {/* Error */}
         {error && (
@@ -616,6 +1000,7 @@ function Dashboard() {
                     onSelect={handlePlayerSelect}
                     isExpanded={expandedPlayer === p.player_name}
                     breakdown={expandedPlayer === p.player_name ? breakdown : null}
+                    targetData={targetData}
                   />
                 ))}
               </tbody>

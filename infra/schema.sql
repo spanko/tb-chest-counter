@@ -144,6 +144,18 @@ WHERE c.scanned_at > NOW() - INTERVAL '7 days'
 GROUP BY c.clan_id, cl.clan_name
 ORDER BY total_points_7d DESC;
 
+-- ---------------------------------------------------------------------------
+-- Clan settings — weekly targets and configuration
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS clan_settings (
+    clan_id             TEXT PRIMARY KEY REFERENCES clans(clan_id),
+    weekly_chest_target INTEGER DEFAULT 30,           -- Min chests per member per week
+    weekly_point_target INTEGER DEFAULT 100,          -- Min points per member per week
+    target_type         TEXT DEFAULT 'chests',        -- 'chests', 'points', or 'both'
+    week_start_day      INTEGER DEFAULT 1,            -- 1=Monday, 0=Sunday
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Player chest type breakdown
 CREATE OR REPLACE VIEW v_player_breakdown AS
 SELECT
