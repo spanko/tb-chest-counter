@@ -30,8 +30,6 @@ jobs:
           app_location: "/dashboard"
           api_location: "/dashboard/api"
           output_location: "build"  # Vite config specifies 'build' as outDir
-        env:
-          VITE_API_BASE: ${{ secrets.VITE_API_BASE }}
         continue-on-error: true
 
       - name: Check deployment status
