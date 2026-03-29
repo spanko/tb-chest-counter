@@ -16,10 +16,10 @@ module.exports = async function (context, req) {
     //
     // Categories (in priority order):
     //   ci (Citadels): Citadel in source/chest_type, or Gnome Workshop
-    //   ev (Events):   Event sources or Union/Triumphal/Mimic chests
-    //   he (Heroic):   Monster sources or Barbarian/Dragon/Demon chests
+    //   ev (Events):   Event sources, Golden Guardian, Ancients, Gladiator, etc.
+    //   he (Heroic):   Monster sources or monster-named chests
     //   cr (Crypts):   Crypt in source, or known crypt-themed chest names
-    //   cl (Clan):     Clan sources, wealth chests, or catch-all default
+    //   cl (Clan):     Wealth chests, or catch-all default
     let query = `
       SELECT
         c.player_name AS name,
@@ -38,9 +38,11 @@ module.exports = async function (context, req) {
           WHEN c.source ILIKE ANY(ARRAY[
             '%Ancient%', '%Ragnarok%', '%Olympus%', '%Dark Omen%',
             '%Halloween%', '%Wreath%', '%Doomsday%', '%Arachne%'])
-            OR c.chest_type ILIKE '%Union Chest%'
-            OR c.chest_type ILIKE '%Triumphal%'
-            OR c.chest_type ILIKE '%Mimic%'
+            OR c.chest_type ILIKE ANY(ARRAY[
+              '%Union Chest%', '%Triumphal%', '%Mimic%',
+              '%Golden Guardian%', '%Ancients%', '%Ancient Warrior%',
+              '%Ancient Bastion%', '%Gladiator%', '%Quick March%',
+              '%House of Horrors%'])
           THEN 1 ELSE 0
         END)::int AS ev,
 
@@ -48,7 +50,9 @@ module.exports = async function (context, req) {
         SUM(CASE
           WHEN c.source ILIKE ANY(ARRAY['%Heroic%', '%Epic Squad%', '%Monster%'])
             OR c.chest_type ILIKE ANY(ARRAY[
-              '%Heroic%', '%Barbarian%', '%Undead%', '%Dragon%', '%Demon%'])
+              '%Heroic%', '%Barbarian%', '%Undead%', '%Dragon%', '%Demon%',
+              '%Chimera%', '%Minotaur%', '%Harpy%', '%Griffin%', '%Hydra%',
+              '%Cerberus%', '%Phoenix%', '%Cyclops%', '%Medusa%', '%Kraken%'])
           THEN 1 ELSE 0
         END)::int AS he,
 
@@ -57,12 +61,16 @@ module.exports = async function (context, req) {
           WHEN c.source ILIKE '%Crypt%'
             OR c.chest_type ILIKE '%Crypt%'
             OR c.chest_type ILIKE ANY(ARRAY[
+              -- Common crypt themes
               '%Fire Chest%', '%Sand Chest%', '%Orc Chest%', '%Orc Temple%',
               '%Cobra Chest%', '%Stone Chest%', '%Mayan Chest%',
               '%Bone Chest%', '%Trillium Chest%', '%Infernal Chest%',
-              '%Elegant Chest%',
-              '%Serpent Sanctuary%', '%Black Mountain%',
-              '%Departed%', '%Fiery Depths%', '%Old Engineer%'])
+              '%Elegant Chest%', '%Serpent Sanctuary%', '%Black Mountain%',
+              '%Departed%', '%Fiery Depths%', '%Old Engineer%',
+              -- Additional crypt themes found in data
+              '%Forgotten Chest%', '%Titansteel%', '%Braided Chest%',
+              '%Turtle Chest%', '%White Wood%', '%Abandoned Chest%',
+              '%Merchant%s Chest%'])
           THEN 1 ELSE 0
         END)::int AS cr,
 
@@ -77,13 +85,17 @@ module.exports = async function (context, req) {
           SUM(CASE WHEN c.source ILIKE ANY(ARRAY[
             '%Ancient%', '%Ragnarok%', '%Olympus%', '%Dark Omen%',
             '%Halloween%', '%Wreath%', '%Doomsday%', '%Arachne%'])
-            OR c.chest_type ILIKE '%Union Chest%'
-            OR c.chest_type ILIKE '%Triumphal%'
-            OR c.chest_type ILIKE '%Mimic%' THEN 1 ELSE 0 END) +
+            OR c.chest_type ILIKE ANY(ARRAY[
+              '%Union Chest%', '%Triumphal%', '%Mimic%',
+              '%Golden Guardian%', '%Ancients%', '%Ancient Warrior%',
+              '%Ancient Bastion%', '%Gladiator%', '%Quick March%',
+              '%House of Horrors%']) THEN 1 ELSE 0 END) +
           -- Subtract heroic
           SUM(CASE WHEN c.source ILIKE ANY(ARRAY['%Heroic%', '%Epic Squad%', '%Monster%'])
             OR c.chest_type ILIKE ANY(ARRAY[
-              '%Heroic%', '%Barbarian%', '%Undead%', '%Dragon%', '%Demon%']) THEN 1 ELSE 0 END) +
+              '%Heroic%', '%Barbarian%', '%Undead%', '%Dragon%', '%Demon%',
+              '%Chimera%', '%Minotaur%', '%Harpy%', '%Griffin%', '%Hydra%',
+              '%Cerberus%', '%Phoenix%', '%Cyclops%', '%Medusa%', '%Kraken%']) THEN 1 ELSE 0 END) +
           -- Subtract crypts
           SUM(CASE WHEN c.source ILIKE '%Crypt%'
             OR c.chest_type ILIKE '%Crypt%'
@@ -91,9 +103,11 @@ module.exports = async function (context, req) {
               '%Fire Chest%', '%Sand Chest%', '%Orc Chest%', '%Orc Temple%',
               '%Cobra Chest%', '%Stone Chest%', '%Mayan Chest%',
               '%Bone Chest%', '%Trillium Chest%', '%Infernal Chest%',
-              '%Elegant Chest%',
-              '%Serpent Sanctuary%', '%Black Mountain%',
-              '%Departed%', '%Fiery Depths%', '%Old Engineer%']) THEN 1 ELSE 0 END)
+              '%Elegant Chest%', '%Serpent Sanctuary%', '%Black Mountain%',
+              '%Departed%', '%Fiery Depths%', '%Old Engineer%',
+              '%Forgotten Chest%', '%Titansteel%', '%Braided Chest%',
+              '%Turtle Chest%', '%White Wood%', '%Abandoned Chest%',
+              '%Merchant%s Chest%']) THEN 1 ELSE 0 END)
         )::int AS cl,
 
         -- Average levels per category (extract "level N" from source field)
@@ -106,7 +120,10 @@ module.exports = async function (context, req) {
               '%Cobra Chest%', '%Stone Chest%', '%Mayan Chest%',
               '%Bone Chest%', '%Trillium Chest%', '%Infernal Chest%',
               '%Elegant Chest%', '%Serpent Sanctuary%', '%Black Mountain%',
-              '%Departed%', '%Fiery Depths%', '%Old Engineer%'])
+              '%Departed%', '%Fiery Depths%', '%Old Engineer%',
+              '%Forgotten Chest%', '%Titansteel%', '%Braided Chest%',
+              '%Turtle Chest%', '%White Wood%', '%Abandoned Chest%',
+              '%Merchant%s Chest%'])
           THEN COALESCE(
             (regexp_match(c.source, '(\\d+)'))[1]::numeric,
             (regexp_match(c.chest_type, '(\\d+)'))[1]::numeric
@@ -128,7 +145,9 @@ module.exports = async function (context, req) {
         ROUND(AVG(CASE
           WHEN c.source ILIKE ANY(ARRAY['%Heroic%', '%Epic Squad%', '%Monster%'])
             OR c.chest_type ILIKE ANY(ARRAY[
-              '%Heroic%', '%Barbarian%', '%Undead%', '%Dragon%', '%Demon%'])
+              '%Heroic%', '%Barbarian%', '%Undead%', '%Dragon%', '%Demon%',
+              '%Chimera%', '%Minotaur%', '%Harpy%', '%Griffin%', '%Hydra%',
+              '%Cerberus%', '%Phoenix%', '%Cyclops%', '%Medusa%', '%Kraken%'])
           THEN COALESCE(
             (regexp_match(c.source, '(\\d+)'))[1]::numeric,
             (regexp_match(c.chest_type, '(\\d+)'))[1]::numeric
