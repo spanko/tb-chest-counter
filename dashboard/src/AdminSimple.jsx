@@ -74,12 +74,12 @@ export function AdminPanel({ theme, API_BASE }) {
     }
   }, [authorized, apiBase]);
 
-  // Fetch target settings
+  // Fetch target settings (uses Static Web App API, not Container Apps)
   const fetchTargetSettings = useCallback(async () => {
     if (!authorized) return;
 
     try {
-      const res = await fetch(`${apiBase}/targets`);
+      const res = await fetch(`${API_BASE}/targets`);
       if (res.ok) {
         const data = await res.json();
         if (data.settings) {
@@ -93,15 +93,15 @@ export function AdminPanel({ theme, API_BASE }) {
     } catch (e) {
       console.error("Failed to fetch target settings:", e);
     }
-  }, [authorized, apiBase]);
+  }, [authorized, API_BASE]);
 
-  // Save target settings
+  // Save target settings (uses Static Web App API, not Container Apps)
   const saveTargetSettings = async () => {
     setTargetLoading(true);
     setTargetMessage("");
 
     try {
-      const res = await fetch(`${apiBase}/targets`, {
+      const res = await fetch(`${API_BASE}/targets`, {
         method: "POST",
         headers: {
           "X-Admin-Code": "FOR2026-ADMIN",
