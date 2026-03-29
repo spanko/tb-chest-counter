@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { AdminPanel } from "./AdminSimple.jsx";
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const ACCESS_CODE = "FOR2026";
@@ -321,7 +322,7 @@ function Dashboard() {
             </p>
           </div>
           <a
-            href="/admin.html"
+            href="#admin"
             style={{
               fontSize: 12, color: t.textTertiary, textDecoration: "none",
               padding: "6px 12px", borderRadius: 6, border: `1px solid ${t.border}`,
@@ -540,10 +541,67 @@ function Dashboard() {
   );
 }
 
+// ── Admin Theme (matches new dashboard theme) ──────────────────────────────
+const adminTheme = {
+  bg: t.bg,
+  surface: t.surface,
+  surfaceAlt: t.surfaceAlt,
+  border: t.border,
+  gold: t.primary,        // Use primary purple instead of gold
+  green: "#1d9e75",
+  red: "#e24b4a",
+  text: t.text,
+  textMuted: t.textSecondary,
+};
+
 // ── App Root ────────────────────────────────────────────────────────────────
 export default function App() {
   const [authed, setAuthed] = useState(() => sessionStorage.getItem("tb-dash-auth") === "1");
+  const [view, setView] = useState(() => {
+    // Check for admin route
+    const hash = window.location.hash;
+    const path = window.location.pathname;
+    if (hash === "#admin" || path.includes("admin")) return "admin";
+    return "dashboard";
+  });
+
+  // Listen for hash changes
+  useEffect(() => {
+    const handleHashChange = () => {
+      setView(window.location.hash === "#admin" ? "admin" : "dashboard");
+    };
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   if (!authed) return <GateScreen onUnlock={() => setAuthed(true)} />;
+
+  if (view === "admin") {
+    return (
+      <div style={{ minHeight: "100vh", background: t.bg, fontFamily: font, padding: "28px 24px 48px" }}>
+        <div style={{ maxWidth: 900, margin: "0 auto" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+            <h1 style={{ fontSize: 22, fontWeight: 700, color: t.text }}>⚙️ Admin Panel</h1>
+            <a
+              href="#"
+              onClick={(e) => { e.preventDefault(); setView("dashboard"); window.location.hash = ""; }}
+              style={{
+                fontSize: 12, color: t.textTertiary, textDecoration: "none",
+                padding: "6px 12px", borderRadius: 6, border: `1px solid ${t.border}`,
+                background: t.surface,
+              }}
+            >
+              ← Dashboard
+            </a>
+          </div>
+          <AdminPanel theme={adminTheme} API_BASE={API_BASE} />
+        </div>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+        `}</style>
+      </div>
+    );
+  }
+
   return <Dashboard />;
 }
