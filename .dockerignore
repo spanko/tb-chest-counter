@@ -16,6 +16,7 @@ build.sh
 # Local data (runtime directories, not repo files)
 data/
 !data/calibration.json
+!data/browser_data/
 
 # Python
 __pycache__/
