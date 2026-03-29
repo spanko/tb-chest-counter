@@ -2,7 +2,7 @@ const { getPool } = require("../shared/db");
 
 module.exports = async function (context, req) {
   const hours = parseInt(req.query.hours) || 168; // default 7 days
-  const clanId = req.query.clan_id || null;
+  const clanId = req.query.clan_id || "for-main"; // default to for-main
 
   // Clamp to reasonable range
   const clampedHours = Math.min(Math.max(hours, 1), 8760); // 1 hour to 365 days
@@ -14,6 +14,12 @@ module.exports = async function (context, req) {
     // Uses CASE WHEN chain - first match wins. Handles both source field
     // (new scans) and chest_type patterns (legacy data with NULL source).
     //
+    // Aliases: OCR-detected names (raw_name) are mapped to canonical names
+    // via the member_aliases table. The leaderboard aggregates by canonical name.
+    //
+    // Roster filter: Only players in clan_roster (or aliased to roster names)
+    // are shown on the leaderboard.
+    //
     // Categories (in priority order):
     //   ci (Citadels): Citadel in source/chest_type, or Gnome Workshop
     //   ev (Events):   Event sources, Golden Guardian, Ancients, Gladiator, etc.
@@ -22,7 +28,7 @@ module.exports = async function (context, req) {
     //   cl (Clan):     Wealth chests, or catch-all default
     let query = `
       SELECT
-        c.player_name AS name,
+        COALESCE(ma.canonical_name, c.player_name) AS name,
         COALESCE(SUM(c.points), 0)::int AS pts,
 
         -- CITADELS: source field or chest_type name
@@ -157,17 +163,17 @@ module.exports = async function (context, req) {
 
         MAX(c.scanned_at) AS last_seen
       FROM chests c
+      -- Join to resolve aliases: raw_name -> canonical_name
+      LEFT JOIN member_aliases ma ON c.player_name = ma.raw_name AND ma.clan_id = $2
+      -- Join to roster to filter only roster members (by canonical name)
+      INNER JOIN clan_roster cr ON COALESCE(ma.canonical_name, c.player_name) = cr.player_name AND cr.clan_id = $2
       WHERE c.scanned_at > NOW() - make_interval(hours => $1)
+        AND c.clan_id = $2
     `;
-    const params = [clampedHours];
-
-    if (clanId) {
-      query += ` AND c.clan_id = $2`;
-      params.push(clanId);
-    }
+    const params = [clampedHours, clanId];
 
     query += `
-      GROUP BY c.player_name
+      GROUP BY COALESCE(ma.canonical_name, c.player_name)
       ORDER BY pts DESC
     `;
 
