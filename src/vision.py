@@ -31,6 +31,7 @@ class GiftInfo:
     """Info about a single gift in the list."""
     player_name: str
     chest_type: str
+    source: str  # Source with level info like "level 10 Crypt" or "Maatan, level 2 Citadel"
     open_button_y: int  # Y coordinate of the Open button
     time_left: str  # Time remaining like "23 hr 45 min" - unique per chest
 
@@ -65,13 +66,16 @@ FIND_ALL_GIFTS_PROMPT = """You are looking at the Total Battle Clan Gifts tab at
 
 The gift list shows rows of chests sent by clan members. Each row shows:
 - A chest icon on the left
-- Player name and chest type (e.g. "Forgotten Chest", "Sapphire Chest", "Barbarian Chest")
+- Chest type name (e.g. "Mayan Chest", "Elegant Chest", "Rare Dragon Chest")
+- Source info showing where the chest came from (e.g. "level 10 Crypt", "Maatan, level 2 Citadel", "Royal Griffin Nest")
+- Player name who sent it
 - Time remaining text (e.g. "Time left: 23 hr 45 min" or "22 hr 13 min")
 - An "Open" button on the right side
 
 List ALL visible gift rows from TOP to BOTTOM. For each gift, provide:
 - player_name: The player who sent it
-- chest_type: The type of chest (e.g. "Orc Chest", "Sand Chest", "Elegant Chest")
+- chest_type: The type of chest (e.g. "Orc Chest", "Elegant Chest", "Elven Citadel Chest")
+- source: The source/origin text showing where the chest came from (e.g. "level 10 Crypt", "Maatan, level 2 Citadel", "Royal Griffin Nest"). This is the smaller text under the chest type that indicates the dungeon level.
 - time_left: The time remaining text exactly as shown (e.g. "23 hr 45 min")
 - open_button_y: The Y pixel coordinate of that row's Open button
 
@@ -82,10 +86,10 @@ Return JSON only:
   "done": false,
   "open_button_x": 770,
   "gifts": [
-    {"player_name": "Player1", "chest_type": "Orc Chest", "time_left": "23 hr 45 min", "open_button_y": 195},
-    {"player_name": "Player2", "chest_type": "Sand Chest", "time_left": "22 hr 13 min", "open_button_y": 255},
-    {"player_name": "Player3", "chest_type": "Elegant Chest", "time_left": "21 hr 30 min", "open_button_y": 315},
-    {"player_name": "Player4", "chest_type": "Forgotten Chest", "time_left": "20 hr 55 min", "open_button_y": 375}
+    {"player_name": "Player1", "chest_type": "Mayan Chest", "source": "Maatan, level 2 Crypt", "time_left": "23 hr 45 min", "open_button_y": 195},
+    {"player_name": "Player2", "chest_type": "Elegant Chest", "source": "level 10 Crypt", "time_left": "22 hr 13 min", "open_button_y": 255},
+    {"player_name": "Player3", "chest_type": "Elven Citadel Chest", "source": "level 5 Citadel", "time_left": "21 hr 30 min", "open_button_y": 315},
+    {"player_name": "Player4", "chest_type": "Rare Dragon Chest", "source": "Royal Griffin Nest", "time_left": "20 hr 55 min", "open_button_y": 375}
   ]
 }
 
@@ -215,6 +219,7 @@ async def find_all_visible_gifts(b64_image: str, config: dict) -> AllGiftsResult
             gifts.append(GiftInfo(
                 player_name=gift_data.get("player_name", ""),
                 chest_type=gift_data.get("chest_type", ""),
+                source=gift_data.get("source", ""),
                 open_button_y=gift_data.get("open_button_y", 0),
                 time_left=gift_data.get("time_left", ""),
             ))
@@ -230,7 +235,7 @@ async def find_all_visible_gifts(b64_image: str, config: dict) -> AllGiftsResult
         else:
             log.info(f"find_all_visible_gifts: Found {len(result.gifts)} gifts")
             for g in result.gifts:
-                log.info(f"  - {g.player_name}: {g.chest_type} at y={g.open_button_y}")
+                log.info(f"  - {g.player_name}: {g.chest_type} ({g.source}) at y={g.open_button_y}")
 
         return result
 

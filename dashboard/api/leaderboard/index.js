@@ -47,23 +47,22 @@ module.exports = async function (context, req) {
           ELSE 1
         END)::int AS cl,
 
-        -- Average levels per category (extract number from chest_type)
+        -- Average levels per category (extract "level N" from source field)
+        -- Source field contains text like "level 10 Crypt" or "Maatan, level 2 Citadel"
         ROUND(AVG(CASE
-          WHEN c.chest_type ILIKE '%Crypt%'
-          THEN (regexp_match(c.chest_type, '(\\d+)'))[1]::numeric
+          WHEN c.source ILIKE '%Crypt%' AND c.source ~ 'level\\s*\\d+'
+          THEN (regexp_match(c.source, 'level\\s*(\\d+)', 'i'))[1]::numeric
           ELSE NULL
         END), 1) AS "crAvg",
         ROUND(AVG(CASE
-          WHEN c.chest_type ILIKE '%Citadel%'
-          THEN (regexp_match(c.chest_type, '(\\d+)'))[1]::numeric
+          WHEN c.source ILIKE '%Citadel%' AND c.source ~ 'level\\s*\\d+'
+          THEN (regexp_match(c.source, 'level\\s*(\\d+)', 'i'))[1]::numeric
           ELSE NULL
         END), 1) AS "ciAvg",
         ROUND(AVG(CASE
-          WHEN c.chest_type ILIKE ANY(ARRAY[
-            '%Heroic%', '%Epic Squad%', '%Monster%', '%Barbarian%',
-            '%Undead%', '%Dragon%', '%Demon%'
-          ])
-          THEN (regexp_match(c.chest_type, '(\\d+)'))[1]::numeric
+          WHEN c.source ILIKE ANY(ARRAY['%Monster%', '%Dragon%', '%Demon%', '%Barbarian%', '%Undead%'])
+               AND c.source ~ 'level\\s*\\d+'
+          THEN (regexp_match(c.source, 'level\\s*(\\d+)', 'i'))[1]::numeric
           ELSE NULL
         END), 1) AS "heAvg",
 
