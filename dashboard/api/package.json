@@ -4,6 +4,6 @@
   "description": "Azure Functions API for TB Chest Counter dashboard",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
-    "pg": "^8.13.0"
+    "pg": "^8.20.0"
   }
 }
