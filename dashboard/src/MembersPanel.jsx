@@ -11,11 +11,11 @@ export function MembersPanel({ theme, API_BASE }) {
   const [editingAlias, setEditingAlias] = useState(null);
   const [editingStatus, setEditingStatus] = useState(null);
 
-  // Alias suggestion state
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [rosterInput, setRosterInput] = useState("");
-  const [suggestions, setSuggestions] = useState([]);
-  const [suggestingAliases, setSuggestingAliases] = useState(false);
+  // AI recommendations state
+  const [showRecommendations, setShowRecommendations] = useState(false);
+  const [recommendations, setRecommendations] = useState([]);
+  const [recStats, setRecStats] = useState(null);
+  const [loadingRecs, setLoadingRecs] = useState(false);
 
   // Fetch members data
   const fetchMembers = useCallback(async () => {
@@ -97,49 +97,67 @@ export function MembersPanel({ theme, API_BASE }) {
     }
   };
 
-  // Request AI alias suggestions
-  const requestSuggestions = async () => {
-    const roster = rosterInput.split('\n').map(n => n.trim()).filter(n => n.length > 0);
-    if (roster.length === 0) {
-      alert("Please paste a list of authoritative player names (one per line)");
-      return;
-    }
-
-    setSuggestingAliases(true);
+  // Request AI recommendations (uses roster from database)
+  const requestRecommendations = async () => {
+    setLoadingRecs(true);
     try {
       const res = await fetch(`${API_BASE}/mgmt?action=suggest-aliases`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Admin-Code": "FOR2026-ADMIN"
-        },
-        body: JSON.stringify({ roster })
+        method: "GET",
+        headers: { "X-Admin-Code": "FOR2026-ADMIN" }
       });
-      if (!res.ok) throw new Error("Failed to get suggestions");
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to get recommendations");
+      }
       const data = await res.json();
-      setSuggestions(data.suggestions || []);
+      setRecommendations(data.recommendations || []);
+      setRecStats(data.stats || null);
     } catch (e) {
       alert(`Error: ${e.message}`);
     } finally {
-      setSuggestingAliases(false);
+      setLoadingRecs(false);
     }
   };
 
-  // Apply a suggestion
-  const applySuggestion = async (suggestion) => {
-    if (suggestion.status === "alias" && suggestion.canonical) {
-      await saveAlias(suggestion.detected, suggestion.canonical);
-      // Remove from suggestions list
-      setSuggestions(prev => prev.filter(s => s.detected !== suggestion.detected));
-    } else if (suggestion.status === "not_found") {
-      await updateStatus(suggestion.detected, "left", "Not in roster");
-      setSuggestions(prev => prev.filter(s => s.detected !== suggestion.detected));
+  // Apply a recommendation
+  const applyRecommendation = async (rec) => {
+    try {
+      if (rec.type === "alias" && rec.canonical) {
+        await saveAlias(rec.detected, rec.canonical);
+      } else if (rec.type === "add_to_roster" && rec.detected) {
+        // Add to roster
+        const res = await fetch(`${API_BASE}/mgmt?action=add-roster-member`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Admin-Code": "FOR2026-ADMIN"
+          },
+          body: JSON.stringify({ name: rec.detected, addedBy: "ai-recommendation" })
+        });
+        if (!res.ok) throw new Error("Failed to add to roster");
+      } else if (rec.type === "remove_from_roster" && rec.rosterName) {
+        // Remove from roster
+        const res = await fetch(`${API_BASE}/mgmt?action=remove-roster-member`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Admin-Code": "FOR2026-ADMIN"
+          },
+          body: JSON.stringify({ name: rec.rosterName })
+        });
+        if (!res.ok) throw new Error("Failed to remove from roster");
+      }
+      // Remove from recommendations list
+      setRecommendations(prev => prev.filter(r => r !== rec));
+      fetchMembers();
+    } catch (e) {
+      alert(`Error: ${e.message}`);
     }
   };
 
-  // Dismiss a suggestion
-  const dismissSuggestion = (detected) => {
-    setSuggestions(prev => prev.filter(s => s.detected !== detected));
+  // Dismiss a recommendation
+  const dismissRecommendation = (rec) => {
+    setRecommendations(prev => prev.filter(r => r !== rec));
   };
 
   // Filter members
@@ -244,19 +262,25 @@ export function MembersPanel({ theme, API_BASE }) {
           ))}
         </div>
         <button
-          onClick={() => setShowSuggestions(!showSuggestions)}
+          onClick={() => {
+            setShowRecommendations(!showRecommendations);
+            if (!showRecommendations && recommendations.length === 0) {
+              requestRecommendations();
+            }
+          }}
+          disabled={loadingRecs}
           style={{
             padding: "6px 14px",
             fontSize: 12,
             border: `1px solid ${theme.gold}`,
             borderRadius: 6,
-            cursor: "pointer",
-            background: showSuggestions ? theme.gold : "transparent",
-            color: showSuggestions ? "#fff" : theme.gold,
+            cursor: loadingRecs ? "wait" : "pointer",
+            background: showRecommendations ? theme.gold : "transparent",
+            color: showRecommendations ? "#fff" : theme.gold,
             marginLeft: "auto"
           }}
         >
-          AI Suggest Aliases
+          {loadingRecs ? "Analyzing..." : "AI Recommendations"}
         </button>
         <button
           onClick={fetchMembers}
@@ -274,8 +298,8 @@ export function MembersPanel({ theme, API_BASE }) {
         </button>
       </div>
 
-      {/* AI Alias Suggestions Panel */}
-      {showSuggestions && (
+      {/* AI Recommendations Panel */}
+      {showRecommendations && (
         <div style={{
           background: theme.surface,
           border: `1px solid ${theme.gold}`,
@@ -283,64 +307,64 @@ export function MembersPanel({ theme, API_BASE }) {
           padding: 16,
           marginBottom: 16
         }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: theme.text, marginBottom: 12 }}>
-            AI Alias Suggestions
-          </h3>
-          <p style={{ fontSize: 12, color: theme.textMuted, marginBottom: 12 }}>
-            Paste your authoritative clan roster (one name per line) and Claude will match detected names to find typos and departed members.
-          </p>
-          <textarea
-            value={rosterInput}
-            onChange={(e) => setRosterInput(e.target.value)}
-            placeholder="Paste roster here (one name per line)&#10;Example:&#10;Sedtis Sharpstone&#10;DarkKnight42&#10;ClanLeader"
-            style={{
-              width: "100%",
-              minHeight: 120,
-              padding: 10,
-              fontSize: 12,
-              border: `1px solid ${theme.border}`,
-              borderRadius: 6,
-              background: theme.bg,
-              color: theme.text,
-              fontFamily: "inherit",
-              resize: "vertical",
-              marginBottom: 12
-            }}
-          />
-          <button
-            onClick={requestSuggestions}
-            disabled={suggestingAliases}
-            style={{
-              padding: "8px 16px",
-              fontSize: 13,
-              fontWeight: 500,
-              border: "none",
-              borderRadius: 6,
-              cursor: suggestingAliases ? "not-allowed" : "pointer",
-              background: suggestingAliases ? theme.border : theme.gold,
-              color: "#fff"
-            }}
-          >
-            {suggestingAliases ? "Analyzing..." : "Analyze with Claude"}
-          </button>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: theme.text, margin: 0 }}>
+              AI Recommendations
+            </h3>
+            <button
+              onClick={requestRecommendations}
+              disabled={loadingRecs}
+              style={{
+                padding: "6px 12px",
+                fontSize: 12,
+                border: `1px solid ${theme.border}`,
+                borderRadius: 6,
+                cursor: loadingRecs ? "wait" : "pointer",
+                background: "transparent",
+                color: theme.textMuted
+              }}
+            >
+              {loadingRecs ? "Analyzing..." : "Refresh"}
+            </button>
+          </div>
 
-          {/* Suggestions Results */}
-          {suggestions.length > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <h4 style={{ fontSize: 13, fontWeight: 500, color: theme.text, marginBottom: 10 }}>
-                Suggestions ({suggestions.length})
-              </h4>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {suggestions.map(s => (
-                  <SuggestionRow
-                    key={s.detected}
-                    suggestion={s}
-                    onApply={() => applySuggestion(s)}
-                    onDismiss={() => dismissSuggestion(s.detected)}
-                    theme={theme}
-                  />
-                ))}
-              </div>
+          {recStats && (
+            <div style={{
+              display: "flex",
+              gap: 16,
+              fontSize: 12,
+              color: theme.textMuted,
+              marginBottom: 12,
+              padding: "8px 12px",
+              background: theme.bg,
+              borderRadius: 6
+            }}>
+              <span>Roster: <strong style={{ color: theme.text }}>{recStats.rosterCount}</strong></span>
+              <span>Detected names: <strong style={{ color: theme.text }}>{recStats.detectedCount}</strong></span>
+              <span>Unaliased: <strong style={{ color: theme.gold }}>{recStats.unaliasedCount}</strong></span>
+              <span>Unseen roster: <strong style={{ color: theme.red }}>{recStats.unseenRosterCount}</strong></span>
+            </div>
+          )}
+
+          {loadingRecs ? (
+            <div style={{ textAlign: "center", padding: 20, color: theme.textMuted }}>
+              Claude is analyzing your roster and detected names...
+            </div>
+          ) : recommendations.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {recommendations.map((rec, idx) => (
+                <RecommendationRow
+                  key={`${rec.type}-${rec.detected || rec.rosterName}-${idx}`}
+                  recommendation={rec}
+                  onApply={() => applyRecommendation(rec)}
+                  onDismiss={() => dismissRecommendation(rec)}
+                  theme={theme}
+                />
+              ))}
+            </div>
+          ) : (
+            <div style={{ textAlign: "center", padding: 20, color: theme.green }}>
+              No recommendations - roster and detected names are in sync!
             </div>
           )}
         </div>
@@ -658,16 +682,36 @@ function StatusEditor({ currentStatus, currentNotes, onSave, onCancel, theme }) 
   );
 }
 
-// AI suggestion row
-function SuggestionRow({ suggestion, onApply, onDismiss, theme }) {
-  const { detected, status, canonical, confidence } = suggestion;
+// AI recommendation row
+function RecommendationRow({ recommendation, onApply, onDismiss, theme }) {
+  const { type, detected, canonical, rosterName, reason, confidence } = recommendation;
 
-  const statusColors = {
-    exact: { bg: `${theme.green}15`, text: theme.green, label: "Exact match" },
-    alias: { bg: `${theme.gold}15`, text: theme.gold, label: "Likely alias" },
-    not_found: { bg: `${theme.red}15`, text: theme.red, label: "Not in roster" }
+  const typeConfig = {
+    alias: {
+      bg: `${theme.gold}15`,
+      text: theme.gold,
+      label: "Alias",
+      icon: "→",
+      actionLabel: "Create Alias"
+    },
+    add_to_roster: {
+      bg: `${theme.green}15`,
+      text: theme.green,
+      label: "Add to Roster",
+      icon: "+",
+      actionLabel: "Add"
+    },
+    remove_from_roster: {
+      bg: `${theme.red}15`,
+      text: theme.red,
+      label: "Consider Removing",
+      icon: "−",
+      actionLabel: "Remove"
+    }
   };
-  const c = statusColors[status] || statusColors.not_found;
+  const config = typeConfig[type] || typeConfig.alias;
+
+  const displayName = type === "remove_from_roster" ? rosterName : detected;
 
   return (
     <div style={{
@@ -679,13 +723,30 @@ function SuggestionRow({ suggestion, onApply, onDismiss, theme }) {
       borderRadius: 6,
       border: `1px solid ${theme.border}`
     }}>
+      <span style={{
+        width: 24,
+        height: 24,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: "50%",
+        background: config.bg,
+        color: config.text,
+        fontWeight: 600,
+        fontSize: 14
+      }}>
+        {config.icon}
+      </span>
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 13, fontWeight: 500, color: theme.text }}>
-          {detected}
+          {displayName}
+          {type === "alias" && canonical && (
+            <span style={{ color: theme.gold, marginLeft: 6 }}>→ {canonical}</span>
+          )}
         </div>
-        {status === "alias" && canonical && (
-          <div style={{ fontSize: 12, color: theme.gold, marginTop: 2 }}>
-            → {canonical}
+        {reason && (
+          <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 2 }}>
+            {reason}
           </div>
         )}
       </div>
@@ -694,30 +755,30 @@ function SuggestionRow({ suggestion, onApply, onDismiss, theme }) {
         borderRadius: 12,
         fontSize: 11,
         fontWeight: 500,
-        background: c.bg,
-        color: c.text
+        background: config.bg,
+        color: config.text
       }}>
-        {c.label}
+        {config.label}
       </span>
-      <span style={{ fontSize: 11, color: theme.textMuted }}>
-        {Math.round(confidence * 100)}%
-      </span>
-      {status !== "exact" && (
-        <button
-          onClick={onApply}
-          style={{
-            padding: "4px 10px",
-            fontSize: 11,
-            border: "none",
-            borderRadius: 4,
-            background: theme.green,
-            color: "#fff",
-            cursor: "pointer"
-          }}
-        >
-          Apply
-        </button>
+      {confidence && (
+        <span style={{ fontSize: 11, color: theme.textMuted, minWidth: 35 }}>
+          {Math.round(confidence * 100)}%
+        </span>
       )}
+      <button
+        onClick={onApply}
+        style={{
+          padding: "4px 10px",
+          fontSize: 11,
+          border: "none",
+          borderRadius: 4,
+          background: config.text,
+          color: "#fff",
+          cursor: "pointer"
+        }}
+      >
+        {config.actionLabel}
+      </button>
       <button
         onClick={onDismiss}
         style={{

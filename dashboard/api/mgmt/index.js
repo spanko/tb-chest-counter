@@ -597,70 +597,98 @@ module.exports = async function (context, req) {
         break;
 
       case "suggest-aliases":
-        // Use Claude to match detected names to authoritative roster
-        if (req.method !== "POST") {
-          context.res = { status: 405, body: JSON.stringify({ error: "Method not allowed" }) };
-          break;
-        }
-
+        // Use Claude to analyze roster vs detected names and make recommendations
+        // Now uses clan_roster from database instead of requiring roster input
         try {
-          let suggestBody = {};
-          try {
-            suggestBody = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
-          } catch (parseErr) {
-            context.log.warn("Failed to parse suggest-aliases body:", parseErr);
-          }
+          // Get authoritative roster from database
+          const rosterQuery = `
+            SELECT player_name FROM clan_roster WHERE clan_id = $1 ORDER BY player_name
+          `;
+          const rosterResult = await pool.query(rosterQuery, [DEFAULT_CLAN_ID]);
+          const authoritativeRoster = rosterResult.rows.map(r => r.player_name);
 
-          // Get authoritative roster from request body
-          const authoritativeRoster = suggestBody.roster || [];
           if (!authoritativeRoster.length) {
             context.res = {
               status: 400,
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ error: "roster array is required (list of authoritative player names)" })
+              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+              body: JSON.stringify({
+                error: "No roster found. Please add members to the roster first.",
+                suggestions: []
+              })
             };
             break;
           }
 
-          // Get all detected names from chests that aren't already aliased
+          // Get all detected names from chests with stats
           const detectedQuery = `
-            SELECT DISTINCT c.player_name, COUNT(*) as chest_count
+            SELECT
+              c.player_name,
+              COUNT(*) as chest_count,
+              SUM(c.points) as total_points,
+              MAX(c.scanned_at) as last_seen,
+              ma.canonical_name as existing_alias
             FROM chests c
             LEFT JOIN member_aliases ma ON c.player_name = ma.raw_name AND ma.clan_id = c.clan_id
-            WHERE c.clan_id = $1 AND ma.id IS NULL
-            GROUP BY c.player_name
+            WHERE c.clan_id = $1
+            GROUP BY c.player_name, ma.canonical_name
             ORDER BY c.player_name
           `;
           const detected = await pool.query(detectedQuery, [DEFAULT_CLAN_ID]);
-          const detectedNames = detected.rows.map(r => ({ name: r.player_name, chests: parseInt(r.chest_count) }));
+          const detectedNames = detected.rows.map(r => ({
+            name: r.player_name,
+            chests: parseInt(r.chest_count),
+            points: parseInt(r.total_points),
+            lastSeen: r.last_seen,
+            existingAlias: r.existing_alias
+          }));
+
+          // Filter to only unaliased names that need attention
+          const unaliasedNames = detectedNames.filter(d => !d.existingAlias);
+
+          // Find roster members who have never been seen in chests
+          const seenNames = new Set(detectedNames.map(d => d.existingAlias || d.name));
+          const unseenRosterMembers = authoritativeRoster.filter(name => !seenNames.has(name));
 
           // Call Claude API to suggest matches
           const Anthropic = require("@anthropic-ai/sdk");
           const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-          const prompt = `You are analyzing player names from a game clan. I have two lists:
+          const prompt = `You are analyzing player names from a game clan. Analyze and make recommendations.
 
-1. AUTHORITATIVE ROSTER (correct names):
+AUTHORITATIVE ROSTER (${authoritativeRoster.length} members):
 ${authoritativeRoster.map(n => `- ${n}`).join('\n')}
 
-2. DETECTED NAMES (from OCR, may have typos):
-${detectedNames.map(d => `- "${d.name}" (${d.chests} chests)`).join('\n')}
+DETECTED NAMES FROM OCR (not yet aliased, ${unaliasedNames.length} names):
+${unaliasedNames.map(d => {
+  const daysSince = Math.floor((Date.now() - new Date(d.lastSeen).getTime()) / (1000 * 60 * 60 * 24));
+  return `- "${d.name}" (${d.chests} chests, ${d.points} pts, last seen ${daysSince} days ago)`;
+}).join('\n')}
 
-For each detected name, determine if it:
-- Exactly matches a roster name (status: "exact")
-- Is a typo/OCR error of a roster name (status: "alias", suggest the correct name)
-- Is not in the roster - probably left the clan (status: "not_found")
+ROSTER MEMBERS NEVER SEEN IN SCANS:
+${unseenRosterMembers.length > 0 ? unseenRosterMembers.map(n => `- ${n}`).join('\n') : '(none)'}
+
+For each situation, provide a recommendation with one of these types:
+- "alias": OCR name should be aliased to a roster name (e.g., typo, missing space)
+- "add_to_roster": Detected name is real and should be added to roster (new member)
+- "remove_from_roster": Roster member hasn't been seen - consider removing (may have left)
+- "exact": Name exactly matches roster (no action needed)
 
 Return JSON only:
 {
-  "suggestions": [
-    {"detected": "SedtisSharpston", "status": "alias", "canonical": "Sedtis Sharpstone", "confidence": 0.95},
-    {"detected": "Sedtis Sharpstone", "status": "exact", "canonical": "Sedtis Sharpstone", "confidence": 1.0},
-    {"detected": "OldPlayer123", "status": "not_found", "canonical": null, "confidence": 0.9}
+  "recommendations": [
+    {"type": "alias", "detected": "SedtisSharpston", "canonical": "Sedtis Sharpstone", "reason": "Missing space, likely OCR error", "confidence": 0.95},
+    {"type": "add_to_roster", "detected": "NewPlayer2024", "reason": "Active player with 45 chests, not in roster", "confidence": 0.9},
+    {"type": "remove_from_roster", "rosterName": "OldPlayer", "reason": "In roster but never seen in scans", "confidence": 0.7},
+    {"type": "exact", "detected": "ValidPlayer", "canonical": "ValidPlayer", "confidence": 1.0}
   ]
 }
 
-Be generous with matching - OCR often misses spaces, confuses similar characters (l/I/1, 0/O), or truncates names.`;
+Guidelines:
+- OCR often misses spaces, confuses similar characters (l/I/1, 0/O), or truncates names
+- If a detected name has many chests but isn't in roster, suggest adding them
+- If a roster member hasn't been seen, they may have left - but use lower confidence
+- Don't suggest removing roster members who might just be new/inactive
+- Focus on actionable recommendations (skip "exact" matches unless useful)`;
 
           const response = await anthropic.messages.create({
             model: "claude-sonnet-4-20250514",
@@ -668,34 +696,43 @@ Be generous with matching - OCR often misses spaces, confuses similar characters
             messages: [{ role: "user", content: prompt }]
           });
 
-          let suggestions = [];
+          let recommendations = [];
           try {
             let text = response.content[0].text;
             // Extract JSON from response
             const jsonMatch = text.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
               const data = JSON.parse(jsonMatch[0]);
-              suggestions = data.suggestions || [];
+              recommendations = data.recommendations || [];
             }
           } catch (parseErr) {
             context.log.warn("Failed to parse Claude response:", parseErr);
           }
 
+          // Filter out exact matches and low-value recommendations
+          const actionableRecs = recommendations.filter(r =>
+            r.type !== "exact" && r.confidence >= 0.5
+          );
+
           context.res = {
             status: 200,
             headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
             body: JSON.stringify({
-              suggestions,
-              detectedCount: detectedNames.length,
-              rosterCount: authoritativeRoster.length
+              recommendations: actionableRecs,
+              stats: {
+                rosterCount: authoritativeRoster.length,
+                detectedCount: detectedNames.length,
+                unaliasedCount: unaliasedNames.length,
+                unseenRosterCount: unseenRosterMembers.length
+              }
             })
           };
         } catch (suggestErr) {
           context.log.error("Suggest aliases error:", suggestErr);
           context.res = {
             status: 500,
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ error: "Failed to suggest aliases", detail: suggestErr.message })
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({ error: "Failed to get recommendations", detail: suggestErr.message })
           };
         }
         break;
