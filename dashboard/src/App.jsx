@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { AdminPanel } from "./AdminSimple";
+import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const ACCESS_CODE = "FOR2026"; // Change this or move to env var
@@ -110,8 +111,17 @@ function GateScreen({ onUnlock }) {
   );
 }
 
-// ── Stat Card ───────────────────────────────────────────────────────────────
-function StatCard({ label, value, icon }) {
+// ── Chart Colors ─────────────────────────────────────────────────────────────
+const CHART_COLORS = ["#c9a227", "#4ade80", "#60a5fa", "#f472b6", "#a78bfa", "#fb923c", "#f87171", "#2dd4bf"];
+
+// ── Stat Card with Trend ─────────────────────────────────────────────────────
+function StatCard({ label, value, icon, delta, deltaPct }) {
+  const hasDelta = delta !== undefined && delta !== null;
+  const isPositive = delta > 0;
+  const isNegative = delta < 0;
+  const trendColor = isPositive ? theme.green : isNegative ? theme.red : theme.textMuted;
+  const trendArrow = isPositive ? "↑" : isNegative ? "↓" : "→";
+
   return (
     <div style={{
       background: theme.surface, border: `1px solid ${theme.border}`,
@@ -120,8 +130,168 @@ function StatCard({ label, value, icon }) {
       <div style={{ fontSize: 12, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
         {icon} {label}
       </div>
-      <div style={{ fontSize: 28, fontFamily: font, color: theme.goldBright, fontWeight: 700 }}>
-        {value != null ? value.toLocaleString() : "—"}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <div style={{ fontSize: 28, fontFamily: font, color: theme.goldBright, fontWeight: 700 }}>
+          {value != null ? value.toLocaleString() : "—"}
+        </div>
+        {hasDelta && (
+          <div style={{ fontSize: 12, color: trendColor, fontWeight: 600 }}>
+            {trendArrow} {Math.abs(delta).toLocaleString()}
+            {deltaPct != null && <span style={{ marginLeft: 4 }}>({deltaPct > 0 ? "+" : ""}{deltaPct}%)</span>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Scan Health Indicator ────────────────────────────────────────────────────
+function ScanHealthIndicator({ health }) {
+  if (!health) return null;
+
+  const statusColors = {
+    healthy: theme.green,
+    running: "#60a5fa",
+    warning: "#fb923c",
+    stale: theme.goldDim,
+    error: theme.red,
+    unknown: theme.textMuted,
+  };
+
+  const statusIcons = {
+    healthy: "●",
+    running: "◉",
+    warning: "◉",
+    stale: "○",
+    error: "●",
+    unknown: "○",
+  };
+
+  const color = statusColors[health.status] || theme.textMuted;
+  const icon = statusIcons[health.status] || "○";
+
+  const lastScan = health.lastRun?.completedAt
+    ? new Date(health.lastRun.completedAt)
+    : null;
+
+  const timeAgo = lastScan
+    ? formatTimeAgo(lastScan)
+    : "Never";
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 8,
+      padding: "6px 12px", borderRadius: 6,
+      background: `${color}15`, border: `1px solid ${color}30`,
+      fontSize: 12, color: color,
+    }}>
+      <span style={{ fontSize: 10 }}>{icon}</span>
+      <span>Last scan: {timeAgo}</span>
+      {health.lastRun?.chestsFound != null && (
+        <span style={{ color: theme.textMuted }}>({health.lastRun.chestsFound} chests)</span>
+      )}
+    </div>
+  );
+}
+
+function formatTimeAgo(date) {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+// ── Category Donut Chart ─────────────────────────────────────────────────────
+function CategoryDonutChart({ data }) {
+  if (!data || data.length === 0) return null;
+
+  const total = data.reduce((sum, d) => sum + d.points, 0);
+
+  return (
+    <div style={{
+      background: theme.surface, border: `1px solid ${theme.border}`,
+      borderRadius: 10, padding: "18px 22px", marginBottom: 24,
+    }}>
+      <h3 style={{ fontSize: 14, color: theme.textMuted, marginBottom: 16, textTransform: "uppercase", letterSpacing: 1 }}>
+        Chest Sources
+      </h3>
+      <div style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
+        <div style={{ width: 160, height: 160 }}>
+          <ResponsiveContainer>
+            <PieChart>
+              <Pie
+                data={data}
+                dataKey="points"
+                nameKey="category"
+                cx="50%"
+                cy="50%"
+                innerRadius={45}
+                outerRadius={70}
+                paddingAngle={2}
+              >
+                {data.map((entry, index) => (
+                  <Cell key={entry.category} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip
+                contentStyle={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 6 }}
+                labelStyle={{ color: theme.textBright }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          {data.slice(0, 6).map((cat, i) => (
+            <div key={cat.category} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+              <div style={{ width: 10, height: 10, borderRadius: 2, background: CHART_COLORS[i % CHART_COLORS.length] }} />
+              <span style={{ flex: 1, color: theme.text, fontSize: 13 }}>{cat.category}</span>
+              <span style={{ color: theme.goldDim, fontSize: 12, fontWeight: 600 }}>{cat.count}</span>
+              <span style={{ color: theme.textMuted, fontSize: 11, width: 50, textAlign: "right" }}>
+                {total > 0 ? Math.round((cat.points / total) * 100) : 0}%
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Daily Trend Chart ────────────────────────────────────────────────────────
+function DailyTrendChart({ data }) {
+  if (!data || data.length === 0) return null;
+
+  // Format dates for display
+  const formatted = data.map((d) => ({
+    ...d,
+    label: new Date(d.period).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+  }));
+
+  return (
+    <div style={{
+      background: theme.surface, border: `1px solid ${theme.border}`,
+      borderRadius: 10, padding: "18px 22px", marginBottom: 24,
+    }}>
+      <h3 style={{ fontSize: 14, color: theme.textMuted, marginBottom: 16, textTransform: "uppercase", letterSpacing: 1 }}>
+        Daily Activity
+      </h3>
+      <div style={{ width: "100%", height: 180 }}>
+        <ResponsiveContainer>
+          <LineChart data={formatted} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: theme.textMuted }} axisLine={{ stroke: theme.border }} tickLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: theme.textMuted }} axisLine={false} tickLine={false} width={40} />
+            <Tooltip
+              contentStyle={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 6, fontSize: 12 }}
+              labelStyle={{ color: theme.textBright }}
+            />
+            <Line type="monotone" dataKey="chests" stroke={theme.gold} strokeWidth={2} dot={{ fill: theme.gold, r: 3 }} name="Chests" />
+            <Line type="monotone" dataKey="players" stroke={theme.green} strokeWidth={2} dot={{ fill: theme.green, r: 3 }} name="Players" />
+          </LineChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );
@@ -189,6 +359,9 @@ function Dashboard() {
   const [expandedPlayer, setExpandedPlayer] = useState(null);
   const [breakdown, setBreakdown] = useState(null);
   const [sortBy, setSortBy] = useState("points"); // "points" or "chests"
+  const [sources, setSources] = useState(null);
+  const [trends, setTrends] = useState(null);
+  const [health, setHealth] = useState(null);
 
   const hours = TIME_RANGES.find((r) => r.key === range)?.hours || 168;
 
@@ -210,7 +383,44 @@ function Dashboard() {
     }
   }, [hours]);
 
-  useEffect(() => { fetchLeaderboard(); }, [fetchLeaderboard]);
+  const fetchSources = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/sources?hours=${hours}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSources(data.categories || []);
+      }
+    } catch {
+      setSources(null);
+    }
+  }, [hours]);
+
+  const fetchTrends = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/trends?hours=${hours}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTrends(data);
+      }
+    } catch {
+      setTrends(null);
+    }
+  }, [hours]);
+
+  const fetchHealth = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/health`);
+      if (res.ok) {
+        const data = await res.json();
+        setHealth(data);
+      }
+    } catch {
+      setHealth(null);
+    }
+  }, []);
+
+  useEffect(() => { fetchLeaderboard(); fetchSources(); fetchTrends(); }, [fetchLeaderboard, fetchSources, fetchTrends]);
+  useEffect(() => { fetchHealth(); }, [fetchHealth]);
 
   const handlePlayerSelect = async (name) => {
     if (expandedPlayer === name) {
@@ -258,6 +468,7 @@ function Dashboard() {
             </h1>
             <p style={{ color: theme.textMuted, fontSize: 12, margin: 0 }}>FOR Clan Dashboard</p>
           </div>
+          <ScanHealthIndicator health={health} />
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           <button
@@ -317,11 +528,34 @@ function Dashboard() {
           ))}
         </div>
 
-        {/* Stats */}
+        {/* Stats with Trend Arrows */}
         <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
-          <StatCard icon="👥" label="Players" value={players.length} />
-          <StatCard icon="📦" label="Chests" value={totalChests} />
-          <StatCard icon="⭐" label="Points" value={totalPoints} />
+          <StatCard
+            icon="👥"
+            label="Players"
+            value={players.length}
+            delta={trends?.comparison?.deltas?.players}
+          />
+          <StatCard
+            icon="📦"
+            label="Chests"
+            value={totalChests}
+            delta={trends?.comparison?.deltas?.chests}
+            deltaPct={trends?.comparison?.deltas?.chests_pct}
+          />
+          <StatCard
+            icon="⭐"
+            label="Points"
+            value={totalPoints}
+            delta={trends?.comparison?.deltas?.points}
+            deltaPct={trends?.comparison?.deltas?.points_pct}
+          />
+        </div>
+
+        {/* Charts Section */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, marginBottom: 24 }}>
+          <CategoryDonutChart data={sources} />
+          <DailyTrendChart data={trends?.data} />
         </div>
 
         {/* Error */}
