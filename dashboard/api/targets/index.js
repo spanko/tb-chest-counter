@@ -9,7 +9,7 @@ module.exports = async function (context, req) {
 
     if (method === "POST") {
       // Update target settings (requires admin)
-      const adminCode = req.headers["x-admin-code"];
+      const adminCode = req.headers["x-admin-code"] || req.headers["X-Admin-Code"];
       if (adminCode !== "FOR2026-ADMIN") {
         context.res = {
           status: 403,
@@ -59,6 +59,18 @@ module.exports = async function (context, req) {
     }
 
     // GET: Fetch current settings and player progress
+    // Ensure table exists first
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS clan_settings (
+        clan_id TEXT PRIMARY KEY,
+        weekly_chest_target INTEGER DEFAULT 30,
+        weekly_point_target INTEGER DEFAULT 100,
+        target_type TEXT DEFAULT 'chests',
+        week_start_day INTEGER DEFAULT 1,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
     // Get settings (with defaults if not set)
     const settingsResult = await pool.query(`
       SELECT
