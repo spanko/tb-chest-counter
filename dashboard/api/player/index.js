@@ -1,9 +1,9 @@
 const { getPool } = require("../shared/db");
 
 module.exports = async function (context, req) {
-  const playerName = req.params.name;
+  const playerName = req.query.name || req.params.name;
   const hours = parseInt(req.query.hours) || 168;
-  const clanId = req.query.clan_id || null;
+  const clanId = req.query.clan_id || "FOR";
 
   if (!playerName) {
     context.res = {
@@ -19,33 +19,32 @@ module.exports = async function (context, req) {
   try {
     const pool = getPool();
 
-    let query = `
+    // Category breakdown with same logic as leaderboard
+    const categoryQuery = `
       SELECT
-        c.chest_type,
-        ct.category,
-        COUNT(*)::int        AS count,
+        CASE
+          WHEN c.source ILIKE '%Citadel%' OR c.chest_type ILIKE '%Citadel%' OR c.chest_type ILIKE '%Gnome Workshop%' THEN 'ci'
+          WHEN c.source ILIKE ANY(ARRAY['%Ancient%', '%Ragnarok%', '%Olympus%', '%Dark Omen%', '%Halloween%', '%Wreath%', '%Doomsday%', '%Arachne%'])
+            OR c.chest_type ILIKE ANY(ARRAY['%Union Chest%', '%Triumphal%', '%Mimic%', '%Golden Guardian%', '%Ancients%', '%Ancient Warrior%', '%Ancient Bastion%', '%Gladiator%', '%Quick March%', '%House of Horrors%']) THEN 'ev'
+          WHEN c.source ILIKE ANY(ARRAY['%Heroic%', '%Epic Squad%', '%Monster%'])
+            OR c.chest_type ILIKE ANY(ARRAY['%Heroic%', '%Barbarian%', '%Undead%', '%Dragon%', '%Demon%', '%Chimera%', '%Minotaur%', '%Harpy%', '%Griffin%', '%Hydra%', '%Cerberus%', '%Phoenix%', '%Cyclops%', '%Medusa%', '%Kraken%']) THEN 'he'
+          WHEN c.source ILIKE '%Crypt%' OR c.chest_type ILIKE '%Crypt%'
+            OR c.chest_type ILIKE ANY(ARRAY['%Fire Chest%', '%Sand Chest%', '%Orc Chest%', '%Orc Temple%', '%Cobra Chest%', '%Stone Chest%', '%Mayan Chest%', '%Bone Chest%', '%Trillium Chest%', '%Infernal Chest%', '%Elegant Chest%', '%Serpent Sanctuary%', '%Black Mountain%', '%Departed%', '%Fiery Depths%', '%Old Engineer%', '%Forgotten Chest%', '%Titansteel%', '%Braided Chest%', '%Turtle Chest%', '%White Wood%', '%Abandoned Chest%', '%Merchant%s Chest%']) THEN 'cr'
+          ELSE 'cl'
+        END AS category,
+        COUNT(*)::int AS count,
         COALESCE(SUM(c.points), 0)::int AS points
       FROM chests c
-      LEFT JOIN chest_types ct ON ct.chest_type = c.chest_type
       WHERE c.player_name = $1
-        AND c.scanned_at > NOW() - make_interval(hours => $2)
-    `;
-    const params = [playerName, clampedHours];
-
-    if (clanId) {
-      query += ` AND c.clan_id = $3`;
-      params.push(clanId);
-    }
-
-    query += `
-      GROUP BY c.chest_type, ct.category
+        AND c.clan_id = $2
+        AND c.scanned_at > NOW() - make_interval(hours => $3)
+      GROUP BY 1
       ORDER BY points DESC
     `;
+    const categoryResult = await pool.query(categoryQuery, [playerName, clanId, clampedHours]);
 
-    const result = await pool.query(query, params);
-
-    // Also get summary stats
-    let summaryQuery = `
+    // Summary stats
+    const summaryQuery = `
       SELECT
         COUNT(*)::int AS chest_count,
         COALESCE(SUM(c.points), 0)::int AS total_points,
@@ -53,16 +52,49 @@ module.exports = async function (context, req) {
         MAX(c.scanned_at) AS last_seen
       FROM chests c
       WHERE c.player_name = $1
-        AND c.scanned_at > NOW() - make_interval(hours => $2)
+        AND c.clan_id = $2
+        AND c.scanned_at > NOW() - make_interval(hours => $3)
     `;
-    const summaryParams = [playerName, clampedHours];
+    const summary = await pool.query(summaryQuery, [playerName, clanId, clampedHours]);
 
-    if (clanId) {
-      summaryQuery += ` AND c.clan_id = $3`;
-      summaryParams.push(clanId);
-    }
+    // Daily activity for chart (last 30 days max)
+    const chartDays = Math.min(Math.ceil(clampedHours / 24), 30);
+    const dailyQuery = `
+      SELECT
+        DATE(c.scanned_at) AS date,
+        COUNT(*)::int AS chests,
+        COALESCE(SUM(c.points), 0)::int AS points
+      FROM chests c
+      WHERE c.player_name = $1
+        AND c.clan_id = $2
+        AND c.scanned_at > NOW() - make_interval(days => $3)
+      GROUP BY DATE(c.scanned_at)
+      ORDER BY date ASC
+    `;
+    const dailyResult = await pool.query(dailyQuery, [playerName, clanId, chartDays]);
 
-    const summary = await pool.query(summaryQuery, summaryParams);
+    // Recent chests (last 20)
+    const recentQuery = `
+      SELECT
+        c.chest_type,
+        c.source,
+        c.points,
+        c.scanned_at
+      FROM chests c
+      WHERE c.player_name = $1
+        AND c.clan_id = $2
+      ORDER BY c.scanned_at DESC
+      LIMIT 20
+    `;
+    const recentResult = await pool.query(recentQuery, [playerName, clanId]);
+
+    // Build category summary object
+    const categories = { cr: 0, ev: 0, ci: 0, he: 0, cl: 0 };
+    categoryResult.rows.forEach(r => {
+      if (categories.hasOwnProperty(r.category)) {
+        categories[r.category] = r.count;
+      }
+    });
 
     context.res = {
       status: 200,
@@ -71,7 +103,18 @@ module.exports = async function (context, req) {
         player_name: playerName,
         hours: clampedHours,
         summary: summary.rows[0] || {},
-        breakdown: result.rows,
+        categories,
+        daily: dailyResult.rows.map(r => ({
+          date: r.date,
+          chests: r.chests,
+          points: r.points
+        })),
+        recent: recentResult.rows.map(r => ({
+          chestType: r.chest_type,
+          source: r.source,
+          points: r.points,
+          scannedAt: r.scanned_at
+        }))
       }),
     };
   } catch (err) {

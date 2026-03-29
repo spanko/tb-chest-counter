@@ -231,6 +231,9 @@ function Dashboard() {
   const [showCitadelAvg, setShowCitadelAvg] = useState(false);
   const [showHeroicAvg, setShowHeroicAvg] = useState(false);
 
+  // Player details modal
+  const [selectedPlayer, setSelectedPlayer] = useState(null);
+
   const hours = TIME_RANGES.find((r) => r.key === range)?.hours || 24;
 
   const fetchLeaderboard = useCallback(async () => {
@@ -286,6 +289,17 @@ function Dashboard() {
   const clanCitadelAvg = activePlayers ? (players.reduce((s, p) => s + (p.ciAvg || 0), 0) / activePlayers).toFixed(1) : "—";
 
   const rankColors = { 1: t.rank1, 2: t.rank2, 3: t.rank3 };
+
+  // Players at risk: bottom 20% by points, or players with 0 chests in selected timeframe
+  const playersAtRisk = useMemo(() => {
+    if (players.length < 5) return [];
+    const threshold = Math.ceil(players.length * 0.2);
+    const sortedByPts = [...players].sort((a, b) => (a.pts || 0) - (b.pts || 0));
+    return sortedByPts.slice(0, threshold).map(p => ({
+      ...p,
+      totalChests: (p.cr || 0) + (p.ev || 0) + (p.ci || 0) + (p.he || 0) + (p.cl || 0)
+    }));
+  }, [players]);
 
   // Build column definitions dynamically
   const columns = useMemo(() => {
@@ -355,7 +369,7 @@ function Dashboard() {
         {/* Category Cards */}
         <div style={{
           display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8,
-          marginBottom: 32,
+          marginBottom: 20,
         }}>
           <CategoryCard label="Crypts" count={catTotals.cr} avgLevel={clanCryptAvg} />
           <CategoryCard label="Events" count={catTotals.ev} />
@@ -363,6 +377,40 @@ function Dashboard() {
           <CategoryCard label="Heroic" count={catTotals.he} />
           <CategoryCard label="Clan" count={catTotals.cl} />
         </div>
+
+        {/* Players at Risk */}
+        {playersAtRisk.length > 0 && (
+          <div style={{
+            background: "#fef2f2", border: "1px solid #fecaca",
+            borderRadius: 12, padding: 14, marginBottom: 24,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <span style={{ fontSize: 14 }}>⚠️</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#b91c1c" }}>
+                Players at Risk ({playersAtRisk.length})
+              </span>
+              <span style={{ fontSize: 11, color: "#dc2626", marginLeft: "auto" }}>
+                Bottom 20% by points
+              </span>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {playersAtRisk.map(p => (
+                <button
+                  key={p.name}
+                  onClick={() => setSelectedPlayer(p.name)}
+                  style={{
+                    padding: "4px 10px", fontSize: 12,
+                    background: "#fff", border: "1px solid #fecaca",
+                    borderRadius: 6, cursor: "pointer",
+                    color: "#b91c1c", fontWeight: 500,
+                  }}
+                >
+                  {p.name} <span style={{ color: "#ef4444", fontWeight: 400 }}>({p.pts} pts)</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Leaderboard */}
         <div>
@@ -468,7 +516,18 @@ function Dashboard() {
                               color: t.text, overflow: "hidden",
                               textOverflow: "ellipsis", whiteSpace: "nowrap",
                             }}>
-                              {val}
+                              <button
+                                onClick={() => setSelectedPlayer(val)}
+                                style={{
+                                  background: "none", border: "none", padding: 0, margin: 0,
+                                  font: "inherit", fontWeight: "inherit", color: "inherit",
+                                  cursor: "pointer", textDecoration: "none",
+                                }}
+                                onMouseEnter={(e) => e.target.style.color = t.primary}
+                                onMouseLeave={(e) => e.target.style.color = t.text}
+                              >
+                                {val}
+                              </button>
                             </td>
                           );
                         }
@@ -538,6 +597,236 @@ function Dashboard() {
           box-shadow: 0 0 0 3px ${t.primaryFaint};
         }
       `}</style>
+
+      {/* Player Details Modal */}
+      {selectedPlayer && (
+        <PlayerModal
+          playerName={selectedPlayer}
+          onClose={() => setSelectedPlayer(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Player Details Modal ─────────────────────────────────────────────────────
+function PlayerModal({ playerName, onClose }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [range, setRange] = useState("7d");
+
+  const hours = { "24h": 24, "7d": 168, "30d": 720 }[range] || 168;
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`${API_BASE}/player?name=${encodeURIComponent(playerName)}&hours=${hours}`)
+      .then(res => res.json())
+      .then(d => { setData(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [playerName, hours]);
+
+  // Close on escape
+  useEffect(() => {
+    const handler = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const catColors = {
+    cr: t.catCrypt, ev: t.catEvent, ci: t.catCitadel, he: t.catHeroic, cl: t.catClan
+  };
+  const catLabels = {
+    cr: "Crypts", ev: "Events", ci: "Citadels", he: "Heroic", cl: "Clan"
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 1000, padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: t.surface, borderRadius: 16, width: "100%", maxWidth: 600,
+          maxHeight: "90vh", overflow: "auto", boxShadow: "0 25px 50px rgba(0,0,0,0.15)",
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          padding: "20px 24px", borderBottom: `1px solid ${t.border}`,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: t.text }}>{playerName}</h2>
+            <p style={{ fontSize: 12, color: t.textTertiary, marginTop: 2 }}>Player Statistics</p>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              width: 32, height: 32, borderRadius: 8, border: "none",
+              background: t.surfaceAlt, color: t.textSecondary,
+              fontSize: 18, cursor: "pointer", display: "flex",
+              alignItems: "center", justifyContent: "center",
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Content */}
+        <div style={{ padding: 24 }}>
+          {/* Time Range */}
+          <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
+            {["24h", "7d", "30d"].map(r => (
+              <button
+                key={r}
+                onClick={() => setRange(r)}
+                style={{
+                  padding: "6px 14px", fontSize: 12, fontWeight: 500,
+                  border: "none", borderRadius: 6, cursor: "pointer",
+                  background: range === r ? t.primary : t.surfaceAlt,
+                  color: range === r ? "#fff" : t.textTertiary,
+                }}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+
+          {loading ? (
+            <div style={{ textAlign: "center", padding: 40, color: t.textTertiary }}>
+              Loading...
+            </div>
+          ) : !data ? (
+            <div style={{ textAlign: "center", padding: 40, color: "#e24b4a" }}>
+              Failed to load player data
+            </div>
+          ) : (
+            <>
+              {/* Summary Stats */}
+              <div style={{
+                display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12,
+                marginBottom: 24,
+              }}>
+                <div style={{ background: t.surfaceAlt, borderRadius: 10, padding: 14 }}>
+                  <div style={{ fontSize: 11, color: t.textTertiary, marginBottom: 4 }}>Total Chests</div>
+                  <div style={{ fontSize: 24, fontWeight: 600, color: t.text }}>
+                    {data.summary?.chest_count || 0}
+                  </div>
+                </div>
+                <div style={{ background: t.surfaceAlt, borderRadius: 10, padding: 14 }}>
+                  <div style={{ fontSize: 11, color: t.textTertiary, marginBottom: 4 }}>Total Points</div>
+                  <div style={{ fontSize: 24, fontWeight: 600, color: t.text }}>
+                    {(data.summary?.total_points || 0).toLocaleString()}
+                  </div>
+                </div>
+                <div style={{ background: t.surfaceAlt, borderRadius: 10, padding: 14 }}>
+                  <div style={{ fontSize: 11, color: t.textTertiary, marginBottom: 4 }}>Last Active</div>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: t.text }}>
+                    {data.summary?.last_seen
+                      ? new Date(data.summary.last_seen).toLocaleDateString()
+                      : "—"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Category Breakdown */}
+              <div style={{ marginBottom: 24 }}>
+                <h3 style={{ fontSize: 13, fontWeight: 600, color: t.text, marginBottom: 12 }}>
+                  Category Breakdown
+                </h3>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {Object.entries(data.categories || {}).map(([cat, count]) => (
+                    <div key={cat} style={{
+                      flex: 1, background: `${catColors[cat]}10`, borderRadius: 8,
+                      padding: 12, textAlign: "center", border: `1px solid ${catColors[cat]}30`,
+                    }}>
+                      <div style={{ fontSize: 20, fontWeight: 600, color: catColors[cat] }}>
+                        {count}
+                      </div>
+                      <div style={{ fontSize: 11, color: t.textSecondary, marginTop: 2 }}>
+                        {catLabels[cat]}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Daily Activity Chart */}
+              {data.daily && data.daily.length > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                  <h3 style={{ fontSize: 13, fontWeight: 600, color: t.text, marginBottom: 12 }}>
+                    Daily Activity
+                  </h3>
+                  <div style={{
+                    background: t.surfaceAlt, borderRadius: 10, padding: 16,
+                    height: 120, display: "flex", alignItems: "flex-end", gap: 4,
+                  }}>
+                    {(() => {
+                      const maxChests = Math.max(...data.daily.map(d => d.chests), 1);
+                      return data.daily.map((d, i) => (
+                        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                          <div
+                            style={{
+                              width: "100%", maxWidth: 24, borderRadius: 4,
+                              background: t.primary,
+                              height: `${(d.chests / maxChests) * 80}px`,
+                              minHeight: d.chests > 0 ? 4 : 0,
+                            }}
+                            title={`${new Date(d.date).toLocaleDateString()}: ${d.chests} chests, ${d.points} pts`}
+                          />
+                          <div style={{ fontSize: 9, color: t.textTertiary, marginTop: 4 }}>
+                            {new Date(d.date).getDate()}
+                          </div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* Recent Chests */}
+              {data.recent && data.recent.length > 0 && (
+                <div>
+                  <h3 style={{ fontSize: 13, fontWeight: 600, color: t.text, marginBottom: 12 }}>
+                    Recent Chests
+                  </h3>
+                  <div style={{
+                    background: t.surfaceAlt, borderRadius: 10,
+                    maxHeight: 200, overflow: "auto",
+                  }}>
+                    {data.recent.slice(0, 10).map((c, i) => (
+                      <div key={i} style={{
+                        padding: "10px 14px", borderBottom: i < 9 ? `1px solid ${t.border}` : "none",
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                      }}>
+                        <div>
+                          <div style={{ fontSize: 13, color: t.text }}>{c.chestType}</div>
+                          {c.source && (
+                            <div style={{ fontSize: 11, color: t.textTertiary }}>{c.source}</div>
+                          )}
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 13, fontWeight: 500, color: t.primary }}>
+                            +{c.points} pts
+                          </div>
+                          <div style={{ fontSize: 10, color: t.textTertiary }}>
+                            {new Date(c.scannedAt).toLocaleDateString()}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
