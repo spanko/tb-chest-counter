@@ -22,7 +22,7 @@ export function MembersPanel({ theme, API_BASE }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/admin?action=members`, {
+      const res = await fetch(`${API_BASE}/mgmt?action=members`, {
         headers: { "X-Admin-Code": "FOR2026-ADMIN" }
       });
       if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -43,7 +43,7 @@ export function MembersPanel({ theme, API_BASE }) {
   // Add/update alias
   const saveAlias = async (rawName, canonicalName) => {
     try {
-      const res = await fetch(`${API_BASE}/admin?action=alias`, {
+      const res = await fetch(`${API_BASE}/mgmt?action=alias`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -63,7 +63,7 @@ export function MembersPanel({ theme, API_BASE }) {
   const removeAlias = async (rawName) => {
     if (!confirm(`Remove alias for ${rawName}?`)) return;
     try {
-      const res = await fetch(`${API_BASE}/admin?action=alias`, {
+      const res = await fetch(`${API_BASE}/mgmt?action=alias`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -81,7 +81,7 @@ export function MembersPanel({ theme, API_BASE }) {
   // Update member status
   const updateStatus = async (playerName, status, notes) => {
     try {
-      const res = await fetch(`${API_BASE}/admin?action=member-status`, {
+      const res = await fetch(`${API_BASE}/mgmt?action=member-status`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -107,7 +107,7 @@ export function MembersPanel({ theme, API_BASE }) {
 
     setSuggestingAliases(true);
     try {
-      const res = await fetch(`${API_BASE}/admin?action=suggest-aliases`, {
+      const res = await fetch(`${API_BASE}/mgmt?action=suggest-aliases`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

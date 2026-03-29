@@ -14,7 +14,7 @@ export function RosterPanel({ theme, API_BASE }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/admin?action=roster`, {
+      const res = await fetch(`${API_BASE}/mgmt?action=roster`, {
         headers: { "X-Admin-Code": "FOR2026-ADMIN" }
       });
       if (!res.ok) throw new Error(`API Error: ${res.status}`);
@@ -37,7 +37,7 @@ export function RosterPanel({ theme, API_BASE }) {
 
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/admin?action=add-roster-member`, {
+      const res = await fetch(`${API_BASE}/mgmt?action=add-roster-member`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -60,7 +60,7 @@ export function RosterPanel({ theme, API_BASE }) {
     if (!confirm(`Remove "${name}" from roster?`)) return;
 
     try {
-      const res = await fetch(`${API_BASE}/admin?action=remove-roster-member`, {
+      const res = await fetch(`${API_BASE}/mgmt?action=remove-roster-member`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -91,7 +91,7 @@ export function RosterPanel({ theme, API_BASE }) {
 
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/admin?action=update-roster`, {
+      const res = await fetch(`${API_BASE}/mgmt?action=update-roster`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
