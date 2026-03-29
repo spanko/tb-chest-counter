@@ -753,6 +753,232 @@ Be generous with matching - OCR often misses spaces, confuses similar characters
         }
         break;
 
+      case "roster":
+        // Get current roster
+        try {
+          // Ensure clan_roster table exists
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS clan_roster (
+              id SERIAL PRIMARY KEY,
+              clan_id VARCHAR(50) NOT NULL,
+              player_name VARCHAR(255) NOT NULL,
+              added_at TIMESTAMP DEFAULT NOW(),
+              added_by VARCHAR(100) DEFAULT 'manual',
+              UNIQUE(clan_id, player_name)
+            )
+          `);
+
+          const rosterQuery = `
+            SELECT player_name, added_at, added_by
+            FROM clan_roster
+            WHERE clan_id = $1
+            ORDER BY player_name ASC
+          `;
+          const roster = await pool.query(rosterQuery, [DEFAULT_CLAN_ID]);
+
+          context.res = {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*"
+            },
+            body: JSON.stringify({
+              roster: roster.rows.map(r => ({
+                name: r.player_name,
+                addedAt: r.added_at,
+                addedBy: r.added_by
+              })),
+              count: roster.rows.length
+            })
+          };
+        } catch (rosterErr) {
+          context.log.error("Roster query error:", rosterErr);
+          context.res = {
+            status: 500,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({ error: "Failed to fetch roster", detail: rosterErr.message })
+          };
+        }
+        break;
+
+      case "update-roster":
+        // Bulk update roster (replace all names)
+        if (req.method !== "POST") {
+          context.res = { status: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+          break;
+        }
+
+        try {
+          let rosterBody = {};
+          try {
+            rosterBody = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+          } catch (parseErr) {
+            context.log.warn("Failed to parse roster body:", parseErr);
+          }
+
+          const { names, addedBy } = rosterBody;
+
+          if (!names || !Array.isArray(names)) {
+            context.res = {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ error: "names array is required" })
+            };
+            break;
+          }
+
+          // Ensure table exists
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS clan_roster (
+              id SERIAL PRIMARY KEY,
+              clan_id VARCHAR(50) NOT NULL,
+              player_name VARCHAR(255) NOT NULL,
+              added_at TIMESTAMP DEFAULT NOW(),
+              added_by VARCHAR(100) DEFAULT 'manual',
+              UNIQUE(clan_id, player_name)
+            )
+          `);
+
+          // Start transaction: clear existing and insert new
+          await pool.query('BEGIN');
+
+          try {
+            // Delete existing roster for this clan
+            await pool.query(
+              `DELETE FROM clan_roster WHERE clan_id = $1`,
+              [DEFAULT_CLAN_ID]
+            );
+
+            // Insert new names
+            if (names.length > 0) {
+              const values = names.map((name, i) =>
+                `($1, $${i + 2}, NOW(), $${names.length + 2})`
+              ).join(', ');
+
+              await pool.query(
+                `INSERT INTO clan_roster (clan_id, player_name, added_at, added_by) VALUES ${values}`,
+                [DEFAULT_CLAN_ID, ...names, addedBy || 'manual']
+              );
+            }
+
+            await pool.query('COMMIT');
+
+            context.res = {
+              status: 200,
+              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+              body: JSON.stringify({
+                success: true,
+                message: `Roster updated with ${names.length} members`,
+                count: names.length
+              })
+            };
+          } catch (txErr) {
+            await pool.query('ROLLBACK');
+            throw txErr;
+          }
+        } catch (updateErr) {
+          context.log.error("Update roster error:", updateErr);
+          context.res = {
+            status: 500,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({ error: "Failed to update roster", detail: updateErr.message })
+          };
+        }
+        break;
+
+      case "add-roster-member":
+        // Add a single member to roster
+        if (req.method !== "POST") {
+          context.res = { status: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+          break;
+        }
+
+        try {
+          let addBody = {};
+          try {
+            addBody = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+          } catch (parseErr) {
+            context.log.warn("Failed to parse add body:", parseErr);
+          }
+
+          const { name, addedBy: addBy } = addBody;
+
+          if (!name) {
+            context.res = {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ error: "name is required" })
+            };
+            break;
+          }
+
+          await pool.query(`
+            INSERT INTO clan_roster (clan_id, player_name, added_at, added_by)
+            VALUES ($1, $2, NOW(), $3)
+            ON CONFLICT (clan_id, player_name) DO NOTHING
+          `, [DEFAULT_CLAN_ID, name.trim(), addBy || 'manual']);
+
+          context.res = {
+            status: 200,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({ success: true, message: `${name} added to roster` })
+          };
+        } catch (addErr) {
+          context.log.error("Add roster member error:", addErr);
+          context.res = {
+            status: 500,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({ error: "Failed to add member", detail: addErr.message })
+          };
+        }
+        break;
+
+      case "remove-roster-member":
+        // Remove a single member from roster
+        if (req.method !== "POST") {
+          context.res = { status: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+          break;
+        }
+
+        try {
+          let removeBody = {};
+          try {
+            removeBody = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+          } catch (parseErr) {
+            context.log.warn("Failed to parse remove body:", parseErr);
+          }
+
+          const { name: removeName } = removeBody;
+
+          if (!removeName) {
+            context.res = {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ error: "name is required" })
+            };
+            break;
+          }
+
+          await pool.query(
+            `DELETE FROM clan_roster WHERE clan_id = $1 AND player_name = $2`,
+            [DEFAULT_CLAN_ID, removeName]
+          );
+
+          context.res = {
+            status: 200,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({ success: true, message: `${removeName} removed from roster` })
+          };
+        } catch (removeErr) {
+          context.log.error("Remove roster member error:", removeErr);
+          context.res = {
+            status: 500,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({ error: "Failed to remove member", detail: removeErr.message })
+          };
+        }
+        break;
+
       default:
         context.res = {
           status: 400,

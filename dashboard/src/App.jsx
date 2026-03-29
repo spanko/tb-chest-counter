@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { AdminPanel } from "./AdminSimple.jsx";
 import { MembersPanel } from "./MembersPanel.jsx";
+import { RosterPanel } from "./RosterPanel.jsx";
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const ACCESS_CODE = "FOR2026";
@@ -838,6 +839,7 @@ function AdminView({ theme, onBack }) {
   const tabs = [
     { key: "jobs", label: "Jobs" },
     { key: "members", label: "Members" },
+    { key: "roster", label: "Roster" },
   ];
 
   return (
@@ -892,6 +894,7 @@ function AdminView({ theme, onBack }) {
         {/* Tab Content */}
         {activeTab === "jobs" && <AdminPanel theme={theme} API_BASE={API_BASE} />}
         {activeTab === "members" && <MembersPanel theme={theme} API_BASE={API_BASE} />}
+        {activeTab === "roster" && <RosterPanel theme={theme} API_BASE={API_BASE} />}
       </div>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
