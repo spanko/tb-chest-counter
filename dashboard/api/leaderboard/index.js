@@ -11,58 +11,128 @@ module.exports = async function (context, req) {
     const pool = getPool();
 
     // Category breakdown query with conditional aggregation
-    // Categories:
-    //   cr (Crypts):   source ILIKE '%Crypt%' (chest names vary: Fire, Sand, etc.)
-    //   ev (Events):   Ancient, Ragnarok, Olympus, Dark Omen, Halloween, Wreath, Doomsday, Arachne, Triumphal
-    //   ci (Citadels): chest_type ILIKE '%Citadel%' OR source ILIKE '%Citadel%'
-    //   he (Heroic):   Heroic, Epic Squad, Monster, Barbarian, Undead, Dragon, Demon
-    //   cl (Clan):     everything else (default bucket)
+    // Uses CASE WHEN chain - first match wins. Handles both source field
+    // (new scans) and chest_type patterns (legacy data with NULL source).
+    //
+    // Categories (in priority order):
+    //   ci (Citadels): Citadel in source/chest_type, or Gnome Workshop
+    //   ev (Events):   Event sources or Union/Triumphal/Mimic chests
+    //   he (Heroic):   Monster sources or Barbarian/Dragon/Demon chests
+    //   cr (Crypts):   Crypt in source, or known crypt-themed chest names
+    //   cl (Clan):     Clan sources, wealth chests, or catch-all default
     let query = `
       SELECT
         c.player_name AS name,
         COALESCE(SUM(c.points), 0)::int AS pts,
 
-        -- Category counts (Crypts detected via source field, not chest_type)
-        SUM(CASE WHEN c.source ILIKE '%Crypt%' THEN 1 ELSE 0 END)::int AS cr,
-        SUM(CASE WHEN c.chest_type ILIKE ANY(ARRAY[
-          '%Ancient%', '%Ragnarok%', '%Olympus%', '%Dark Omen%',
-          '%Halloween%', '%Wreath%', '%Doomsday%', '%Arachne%', '%Triumphal%'
-        ]) THEN 1 ELSE 0 END)::int AS ev,
-        SUM(CASE WHEN c.chest_type ILIKE '%Citadel%' OR c.source ILIKE '%Citadel%' THEN 1 ELSE 0 END)::int AS ci,
-        SUM(CASE WHEN c.chest_type ILIKE ANY(ARRAY[
-          '%Heroic%', '%Epic Squad%', '%Monster%', '%Barbarian%',
-          '%Undead%', '%Dragon%', '%Demon%'
-        ]) THEN 1 ELSE 0 END)::int AS he,
+        -- CITADELS: source field or chest_type name
         SUM(CASE
-          WHEN c.source ILIKE '%Crypt%' THEN 0
-          WHEN c.chest_type ILIKE ANY(ARRAY[
+          WHEN c.source ILIKE '%Citadel%'
+            OR c.chest_type ILIKE '%Citadel%'
+            OR c.chest_type ILIKE '%Gnome Workshop%'
+          THEN 1 ELSE 0
+        END)::int AS ci,
+
+        -- EVENTS: source field or known event chest names
+        SUM(CASE
+          WHEN c.source ILIKE ANY(ARRAY[
             '%Ancient%', '%Ragnarok%', '%Olympus%', '%Dark Omen%',
-            '%Halloween%', '%Wreath%', '%Doomsday%', '%Arachne%', '%Triumphal%'
-          ]) THEN 0
-          WHEN c.chest_type ILIKE '%Citadel%' OR c.source ILIKE '%Citadel%' THEN 0
-          WHEN c.chest_type ILIKE ANY(ARRAY[
-            '%Heroic%', '%Epic Squad%', '%Monster%', '%Barbarian%',
-            '%Undead%', '%Dragon%', '%Demon%'
-          ]) THEN 0
-          ELSE 1
-        END)::int AS cl,
+            '%Halloween%', '%Wreath%', '%Doomsday%', '%Arachne%'])
+            OR c.chest_type ILIKE '%Union Chest%'
+            OR c.chest_type ILIKE '%Triumphal%'
+            OR c.chest_type ILIKE '%Mimic%'
+          THEN 1 ELSE 0
+        END)::int AS ev,
+
+        -- HEROIC: source field or monster-related chests
+        SUM(CASE
+          WHEN c.source ILIKE ANY(ARRAY['%Heroic%', '%Epic Squad%', '%Monster%'])
+            OR c.chest_type ILIKE ANY(ARRAY[
+              '%Heroic%', '%Barbarian%', '%Undead%', '%Dragon%', '%Demon%'])
+          THEN 1 ELSE 0
+        END)::int AS he,
+
+        -- CRYPTS: source field OR known crypt-themed chest names
+        SUM(CASE
+          WHEN c.source ILIKE '%Crypt%'
+            OR c.chest_type ILIKE '%Crypt%'
+            OR c.chest_type ILIKE ANY(ARRAY[
+              '%Fire Chest%', '%Sand Chest%', '%Orc Chest%', '%Orc Temple%',
+              '%Cobra Chest%', '%Stone Chest%', '%Mayan Chest%',
+              '%Bone Chest%', '%Trillium Chest%', '%Infernal Chest%',
+              '%Elegant Chest%',
+              '%Serpent Sanctuary%', '%Black Mountain%',
+              '%Departed%', '%Fiery Depths%', '%Old Engineer%'])
+          THEN 1 ELSE 0
+        END)::int AS cr,
+
+        -- CLAN: everything else (calculated as total minus other categories)
+        -- We compute this separately to avoid double-counting
+        COUNT(*)::int - (
+          -- Subtract citadels
+          SUM(CASE WHEN c.source ILIKE '%Citadel%'
+            OR c.chest_type ILIKE '%Citadel%'
+            OR c.chest_type ILIKE '%Gnome Workshop%' THEN 1 ELSE 0 END) +
+          -- Subtract events
+          SUM(CASE WHEN c.source ILIKE ANY(ARRAY[
+            '%Ancient%', '%Ragnarok%', '%Olympus%', '%Dark Omen%',
+            '%Halloween%', '%Wreath%', '%Doomsday%', '%Arachne%'])
+            OR c.chest_type ILIKE '%Union Chest%'
+            OR c.chest_type ILIKE '%Triumphal%'
+            OR c.chest_type ILIKE '%Mimic%' THEN 1 ELSE 0 END) +
+          -- Subtract heroic
+          SUM(CASE WHEN c.source ILIKE ANY(ARRAY['%Heroic%', '%Epic Squad%', '%Monster%'])
+            OR c.chest_type ILIKE ANY(ARRAY[
+              '%Heroic%', '%Barbarian%', '%Undead%', '%Dragon%', '%Demon%']) THEN 1 ELSE 0 END) +
+          -- Subtract crypts
+          SUM(CASE WHEN c.source ILIKE '%Crypt%'
+            OR c.chest_type ILIKE '%Crypt%'
+            OR c.chest_type ILIKE ANY(ARRAY[
+              '%Fire Chest%', '%Sand Chest%', '%Orc Chest%', '%Orc Temple%',
+              '%Cobra Chest%', '%Stone Chest%', '%Mayan Chest%',
+              '%Bone Chest%', '%Trillium Chest%', '%Infernal Chest%',
+              '%Elegant Chest%',
+              '%Serpent Sanctuary%', '%Black Mountain%',
+              '%Departed%', '%Fiery Depths%', '%Old Engineer%']) THEN 1 ELSE 0 END)
+        )::int AS cl,
 
         -- Average levels per category (extract "level N" from source field)
-        -- Source field contains text like "level 10 Crypt" or "Maatan, level 2 Citadel"
+        -- Prefer source, fall back to chest_type for legacy data
         ROUND(AVG(CASE
-          WHEN c.source ILIKE '%Crypt%' AND c.source ~ 'level\\s*\\d+'
-          THEN (regexp_match(c.source, 'level\\s*(\\d+)', 'i'))[1]::numeric
+          WHEN c.source ILIKE '%Crypt%'
+            OR c.chest_type ILIKE '%Crypt%'
+            OR c.chest_type ILIKE ANY(ARRAY[
+              '%Fire Chest%', '%Sand Chest%', '%Orc Chest%', '%Orc Temple%',
+              '%Cobra Chest%', '%Stone Chest%', '%Mayan Chest%',
+              '%Bone Chest%', '%Trillium Chest%', '%Infernal Chest%',
+              '%Elegant Chest%', '%Serpent Sanctuary%', '%Black Mountain%',
+              '%Departed%', '%Fiery Depths%', '%Old Engineer%'])
+          THEN COALESCE(
+            (regexp_match(c.source, '(\\d+)'))[1]::numeric,
+            (regexp_match(c.chest_type, '(\\d+)'))[1]::numeric
+          )
           ELSE NULL
         END), 1) AS "crAvg",
+
         ROUND(AVG(CASE
-          WHEN c.source ILIKE '%Citadel%' AND c.source ~ 'level\\s*\\d+'
-          THEN (regexp_match(c.source, 'level\\s*(\\d+)', 'i'))[1]::numeric
+          WHEN c.source ILIKE '%Citadel%'
+            OR c.chest_type ILIKE '%Citadel%'
+            OR c.chest_type ILIKE '%Gnome Workshop%'
+          THEN COALESCE(
+            (regexp_match(c.source, '(\\d+)'))[1]::numeric,
+            (regexp_match(c.chest_type, '(\\d+)'))[1]::numeric
+          )
           ELSE NULL
         END), 1) AS "ciAvg",
+
         ROUND(AVG(CASE
-          WHEN c.source ILIKE ANY(ARRAY['%Monster%', '%Dragon%', '%Demon%', '%Barbarian%', '%Undead%'])
-               AND c.source ~ 'level\\s*\\d+'
-          THEN (regexp_match(c.source, 'level\\s*(\\d+)', 'i'))[1]::numeric
+          WHEN c.source ILIKE ANY(ARRAY['%Heroic%', '%Epic Squad%', '%Monster%'])
+            OR c.chest_type ILIKE ANY(ARRAY[
+              '%Heroic%', '%Barbarian%', '%Undead%', '%Dragon%', '%Demon%'])
+          THEN COALESCE(
+            (regexp_match(c.source, '(\\d+)'))[1]::numeric,
+            (regexp_match(c.chest_type, '(\\d+)'))[1]::numeric
+          )
           ELSE NULL
         END), 1) AS "heAvg",
 
