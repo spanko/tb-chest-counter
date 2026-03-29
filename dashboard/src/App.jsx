@@ -311,13 +311,27 @@ function Dashboard() {
       <div style={{ maxWidth: 720, margin: "0 auto" }}>
 
         {/* Header */}
-        <div style={{ marginBottom: 28 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: t.text, marginBottom: 2 }}>
-            ⚔️ FOR Chest Tracker
-          </h1>
-          <p style={{ fontSize: 13, color: t.textTertiary }}>
-            Clan performance dashboard
-          </p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 700, color: t.text, marginBottom: 2 }}>
+              ⚔️ FOR Chest Tracker
+            </h1>
+            <p style={{ fontSize: 13, color: t.textTertiary }}>
+              Clan performance dashboard
+            </p>
+          </div>
+          <a
+            href="/admin.html"
+            style={{
+              fontSize: 12, color: t.textTertiary, textDecoration: "none",
+              padding: "6px 12px", borderRadius: 6, border: `1px solid ${t.border}`,
+              background: t.surface, marginTop: 4,
+            }}
+            onMouseEnter={(e) => { e.target.style.borderColor = t.primary; e.target.style.color = t.primary; }}
+            onMouseLeave={(e) => { e.target.style.borderColor = t.border; e.target.style.color = t.textTertiary; }}
+          >
+            Admin
+          </a>
         </div>
 
         {/* KPI Row */}

@@ -12,9 +12,9 @@ module.exports = async function (context, req) {
 
     // Category breakdown query with conditional aggregation
     // Categories:
-    //   cr (Crypts):   chest_type ILIKE '%Crypt%'
+    //   cr (Crypts):   source ILIKE '%Crypt%' (chest names vary: Fire, Sand, etc.)
     //   ev (Events):   Ancient, Ragnarok, Olympus, Dark Omen, Halloween, Wreath, Doomsday, Arachne, Triumphal
-    //   ci (Citadels): chest_type ILIKE '%Citadel%'
+    //   ci (Citadels): chest_type ILIKE '%Citadel%' OR source ILIKE '%Citadel%'
     //   he (Heroic):   Heroic, Epic Squad, Monster, Barbarian, Undead, Dragon, Demon
     //   cl (Clan):     everything else (default bucket)
     let query = `
@@ -22,24 +22,24 @@ module.exports = async function (context, req) {
         c.player_name AS name,
         COALESCE(SUM(c.points), 0)::int AS pts,
 
-        -- Category counts
-        SUM(CASE WHEN c.chest_type ILIKE '%Crypt%' THEN 1 ELSE 0 END)::int AS cr,
+        -- Category counts (Crypts detected via source field, not chest_type)
+        SUM(CASE WHEN c.source ILIKE '%Crypt%' THEN 1 ELSE 0 END)::int AS cr,
         SUM(CASE WHEN c.chest_type ILIKE ANY(ARRAY[
           '%Ancient%', '%Ragnarok%', '%Olympus%', '%Dark Omen%',
           '%Halloween%', '%Wreath%', '%Doomsday%', '%Arachne%', '%Triumphal%'
         ]) THEN 1 ELSE 0 END)::int AS ev,
-        SUM(CASE WHEN c.chest_type ILIKE '%Citadel%' THEN 1 ELSE 0 END)::int AS ci,
+        SUM(CASE WHEN c.chest_type ILIKE '%Citadel%' OR c.source ILIKE '%Citadel%' THEN 1 ELSE 0 END)::int AS ci,
         SUM(CASE WHEN c.chest_type ILIKE ANY(ARRAY[
           '%Heroic%', '%Epic Squad%', '%Monster%', '%Barbarian%',
           '%Undead%', '%Dragon%', '%Demon%'
         ]) THEN 1 ELSE 0 END)::int AS he,
         SUM(CASE
-          WHEN c.chest_type ILIKE '%Crypt%' THEN 0
+          WHEN c.source ILIKE '%Crypt%' THEN 0
           WHEN c.chest_type ILIKE ANY(ARRAY[
             '%Ancient%', '%Ragnarok%', '%Olympus%', '%Dark Omen%',
             '%Halloween%', '%Wreath%', '%Doomsday%', '%Arachne%', '%Triumphal%'
           ]) THEN 0
-          WHEN c.chest_type ILIKE '%Citadel%' THEN 0
+          WHEN c.chest_type ILIKE '%Citadel%' OR c.source ILIKE '%Citadel%' THEN 0
           WHEN c.chest_type ILIKE ANY(ARRAY[
             '%Heroic%', '%Epic Squad%', '%Monster%', '%Barbarian%',
             '%Undead%', '%Dragon%', '%Demon%'
