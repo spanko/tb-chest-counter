@@ -412,6 +412,240 @@ module.exports = async function (context, req) {
         }
         break;
 
+      case "members":
+        // Member management - list all unique players with aliases and status
+        try {
+          // Ensure member_aliases table exists
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS member_aliases (
+              id SERIAL PRIMARY KEY,
+              raw_name VARCHAR(255) NOT NULL,
+              canonical_name VARCHAR(255) NOT NULL,
+              clan_id VARCHAR(50) NOT NULL,
+              created_at TIMESTAMP DEFAULT NOW(),
+              UNIQUE(raw_name, clan_id)
+            )
+          `);
+
+          // Ensure member_status table exists
+          await pool.query(`
+            CREATE TABLE IF NOT EXISTS member_status (
+              id SERIAL PRIMARY KEY,
+              player_name VARCHAR(255) NOT NULL,
+              clan_id VARCHAR(50) NOT NULL,
+              status VARCHAR(50) DEFAULT 'active',
+              left_at TIMESTAMP,
+              notes TEXT,
+              updated_at TIMESTAMP DEFAULT NOW(),
+              UNIQUE(player_name, clan_id)
+            )
+          `);
+
+          // Get all unique player names with their stats and alias/status info
+          const membersQuery = `
+            WITH player_stats AS (
+              SELECT
+                player_name,
+                COUNT(*) as chest_count,
+                SUM(points) as total_points,
+                MIN(scanned_at) as first_seen,
+                MAX(scanned_at) as last_seen
+              FROM chests
+              WHERE clan_id = $1
+              GROUP BY player_name
+            )
+            SELECT
+              ps.player_name,
+              ps.chest_count,
+              ps.total_points,
+              ps.first_seen,
+              ps.last_seen,
+              ma.canonical_name,
+              ms.status,
+              ms.left_at,
+              ms.notes
+            FROM player_stats ps
+            LEFT JOIN member_aliases ma ON ps.player_name = ma.raw_name AND ma.clan_id = $1
+            LEFT JOIN member_status ms ON COALESCE(ma.canonical_name, ps.player_name) = ms.player_name AND ms.clan_id = $1
+            ORDER BY ps.last_seen DESC
+          `;
+
+          const members = await pool.query(membersQuery, ["FOR"]);
+
+          // Also get the list of canonical names (for alias target dropdown)
+          const canonicalQuery = `
+            SELECT DISTINCT COALESCE(ma.canonical_name, c.player_name) as name
+            FROM chests c
+            LEFT JOIN member_aliases ma ON c.player_name = ma.raw_name AND ma.clan_id = c.clan_id
+            WHERE c.clan_id = $1
+            ORDER BY name
+          `;
+          const canonicals = await pool.query(canonicalQuery, ["FOR"]);
+
+          context.res = {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*"
+            },
+            body: JSON.stringify({
+              members: members.rows.map(m => ({
+                name: m.player_name,
+                canonicalName: m.canonical_name || null,
+                chestCount: parseInt(m.chest_count),
+                totalPoints: parseInt(m.total_points),
+                firstSeen: m.first_seen,
+                lastSeen: m.last_seen,
+                status: m.status || 'active',
+                leftAt: m.left_at,
+                notes: m.notes
+              })),
+              canonicalNames: canonicals.rows.map(c => c.name)
+            })
+          };
+        } catch (membersErr) {
+          context.log.error("Members query error:", membersErr);
+          context.res = {
+            status: 500,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*"
+            },
+            body: JSON.stringify({
+              error: "Failed to fetch members",
+              detail: membersErr.message
+            })
+          };
+        }
+        break;
+
+      case "alias":
+        // Add or remove an alias
+        if (req.method !== "POST") {
+          context.res = { status: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+          break;
+        }
+
+        try {
+          let aliasBody = {};
+          try {
+            aliasBody = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+          } catch (parseErr) {
+            context.log.warn("Failed to parse alias body:", parseErr);
+          }
+
+          const { rawName, canonicalName, remove } = aliasBody;
+
+          if (!rawName) {
+            context.res = {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ error: "rawName is required" })
+            };
+            break;
+          }
+
+          if (remove) {
+            // Remove alias
+            await pool.query(
+              `DELETE FROM member_aliases WHERE raw_name = $1 AND clan_id = $2`,
+              [rawName, "FOR"]
+            );
+            context.res = {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ success: true, message: `Alias removed for ${rawName}` })
+            };
+          } else {
+            // Add/update alias
+            if (!canonicalName) {
+              context.res = {
+                status: 400,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ error: "canonicalName is required when adding alias" })
+              };
+              break;
+            }
+
+            await pool.query(`
+              INSERT INTO member_aliases (raw_name, canonical_name, clan_id)
+              VALUES ($1, $2, $3)
+              ON CONFLICT (raw_name, clan_id)
+              DO UPDATE SET canonical_name = $2
+            `, [rawName, canonicalName, "FOR"]);
+
+            context.res = {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                success: true,
+                message: `${rawName} is now aliased to ${canonicalName}`
+              })
+            };
+          }
+        } catch (aliasErr) {
+          context.log.error("Alias error:", aliasErr);
+          context.res = {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ error: "Failed to update alias", detail: aliasErr.message })
+          };
+        }
+        break;
+
+      case "member-status":
+        // Update member status (active, left, etc.)
+        if (req.method !== "POST") {
+          context.res = { status: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+          break;
+        }
+
+        try {
+          let statusBody = {};
+          try {
+            statusBody = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+          } catch (parseErr) {
+            context.log.warn("Failed to parse status body:", parseErr);
+          }
+
+          const { playerName, status, notes } = statusBody;
+
+          if (!playerName || !status) {
+            context.res = {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ error: "playerName and status are required" })
+            };
+            break;
+          }
+
+          const leftAt = status === 'left' ? 'NOW()' : 'NULL';
+
+          await pool.query(`
+            INSERT INTO member_status (player_name, clan_id, status, left_at, notes, updated_at)
+            VALUES ($1, $2, $3, ${status === 'left' ? 'NOW()' : 'NULL'}, $4, NOW())
+            ON CONFLICT (player_name, clan_id)
+            DO UPDATE SET status = $3, left_at = ${status === 'left' ? 'NOW()' : 'NULL'}, notes = $4, updated_at = NOW()
+          `, [playerName, "FOR", status, notes || null]);
+
+          context.res = {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              success: true,
+              message: `${playerName} status updated to ${status}`
+            })
+          };
+        } catch (statusErr) {
+          context.log.error("Member status error:", statusErr);
+          context.res = {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ error: "Failed to update member status", detail: statusErr.message })
+          };
+        }
+        break;
+
       default:
         context.res = {
           status: 400,

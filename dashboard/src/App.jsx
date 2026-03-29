@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { AdminPanel } from "./AdminSimple.jsx";
+import { MembersPanel } from "./MembersPanel.jsx";
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const ACCESS_CODE = "FOR2026";
@@ -541,6 +542,75 @@ function Dashboard() {
   );
 }
 
+// ── Admin View with Tabs ─────────────────────────────────────────────────────
+function AdminView({ theme, onBack }) {
+  const [activeTab, setActiveTab] = useState("jobs");
+
+  const tabs = [
+    { key: "jobs", label: "Jobs" },
+    { key: "members", label: "Members" },
+  ];
+
+  return (
+    <div style={{ minHeight: "100vh", background: t.bg, fontFamily: font, padding: "28px 24px 48px" }}>
+      <div style={{ maxWidth: 1000, margin: "0 auto" }}>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: t.text }}>⚙️ Admin Panel</h1>
+          <a
+            href="#"
+            onClick={(e) => { e.preventDefault(); onBack(); }}
+            style={{
+              fontSize: 12, color: t.textTertiary, textDecoration: "none",
+              padding: "6px 12px", borderRadius: 6, border: `1px solid ${t.border}`,
+              background: t.surface,
+            }}
+          >
+            ← Dashboard
+          </a>
+        </div>
+
+        {/* Tabs */}
+        <div style={{
+          display: "flex",
+          gap: 4,
+          marginBottom: 20,
+          borderBottom: `1px solid ${t.border}`,
+          paddingBottom: 0,
+        }}>
+          {tabs.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              style={{
+                padding: "10px 20px",
+                fontSize: 13,
+                fontWeight: 500,
+                border: "none",
+                borderBottom: activeTab === tab.key ? `2px solid ${t.primary}` : "2px solid transparent",
+                background: "transparent",
+                color: activeTab === tab.key ? t.text : t.textSecondary,
+                cursor: "pointer",
+                marginBottom: -1,
+                transition: "all 0.15s",
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab Content */}
+        {activeTab === "jobs" && <AdminPanel theme={theme} API_BASE={API_BASE} />}
+        {activeTab === "members" && <MembersPanel theme={theme} API_BASE={API_BASE} />}
+      </div>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+      `}</style>
+    </div>
+  );
+}
+
 // ── Admin Theme (matches new dashboard theme) ──────────────────────────────
 const adminTheme = {
   bg: t.bg,
@@ -577,30 +647,7 @@ export default function App() {
   if (!authed) return <GateScreen onUnlock={() => setAuthed(true)} />;
 
   if (view === "admin") {
-    return (
-      <div style={{ minHeight: "100vh", background: t.bg, fontFamily: font, padding: "28px 24px 48px" }}>
-        <div style={{ maxWidth: 900, margin: "0 auto" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-            <h1 style={{ fontSize: 22, fontWeight: 700, color: t.text }}>⚙️ Admin Panel</h1>
-            <a
-              href="#"
-              onClick={(e) => { e.preventDefault(); setView("dashboard"); window.location.hash = ""; }}
-              style={{
-                fontSize: 12, color: t.textTertiary, textDecoration: "none",
-                padding: "6px 12px", borderRadius: 6, border: `1px solid ${t.border}`,
-                background: t.surface,
-              }}
-            >
-              ← Dashboard
-            </a>
-          </div>
-          <AdminPanel theme={adminTheme} API_BASE={API_BASE} />
-        </div>
-        <style>{`
-          @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
-        `}</style>
-      </div>
-    );
+    return <AdminView theme={adminTheme} onBack={() => { setView("dashboard"); window.location.hash = ""; }} />;
   }
 
   return <Dashboard />;
